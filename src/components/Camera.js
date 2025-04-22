@@ -41,13 +41,12 @@ const Camera = ({ onCapture, onCancel }) => {
           throw new Error('Nenhuma câmera detectada no dispositivo');
         }
 
-        // Primeiro tente câmera traseira em dispositivos móveis
-        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        // Configuração para sempre usar a câmera frontal (user)
         const constraints = {
           video: {
             width: { ideal: 640 },
             height: { ideal: 480 },
-            facingMode: isMobile ? "environment" : "user"
+            facingMode: "user" // Sempre usa câmera frontal
           },
           audio: false
         };
@@ -73,7 +72,9 @@ const Camera = ({ onCapture, onCancel }) => {
         if (mounted && error.name !== 'NotAllowedError') {
           try {
             console.log('Tentando novamente com configuração mínima');
-            activeStream = await navigator.mediaDevices.getUserMedia({ video: true });
+            activeStream = await navigator.mediaDevices.getUserMedia({ 
+              video: { facingMode: "user" } 
+            });
             if (mounted) {
               console.log('Segunda tentativa bem-sucedida');
               setHasPermission(true);
@@ -241,11 +242,11 @@ const Camera = ({ onCapture, onCancel }) => {
             screenshotFormat="image/jpeg"
             width="100%"
             videoConstraints={{
-              facingMode: /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? "environment" : "user",
+              facingMode: "user", // Sempre usar câmera frontal
               width: { ideal: 640 },
               height: { ideal: 480 }
             }}
-            mirrored={false}
+            mirrored={true} // Espelhar para melhor experiência com câmera frontal
             className="border-b"
             onUserMedia={() => setIsCameraReady(true)}
             onUserMediaError={(error) => {
