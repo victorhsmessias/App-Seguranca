@@ -213,8 +213,7 @@ const SecurityApp = ({ onLogin }) => {
   const handleShareLocation = () => {
   // Verificar se a geolocalização é suportada
   if (!navigator.geolocation) {
-    // Silenciosamente continuar para a câmera se não houver suporte
-    setShowCamera(true);
+    alert("Seu dispositivo não suporta geolocalização. Não será possível compartilhar sua localização.");
     return;
   }
 
@@ -239,19 +238,30 @@ const SecurityApp = ({ onLogin }) => {
       setShowCamera(true);
     },
     
-    // Erro - silenciosamente continua para a câmera
+    // Erro - mostrar mensagem de orientação apenas se for erro de permissão
     (error) => {
       console.error("Erro na geolocalização:", error.code, error.message);
       
-      // Mesmo com erro, prossegue para a câmera sem mostrar mensagens
-      setLocation(null);
-      setShowCamera(true);
+      if (error.code === error.PERMISSION_DENIED) {
+        // Mostrar modal ou alerta orientando como permitir
+        alert(
+          "Você precisa permitir o acesso à sua localização para continuar.\n\n" +
+          "Para habilitar o acesso:\n" +
+          "- Clique no ícone de cadeado na barra de endereço\n" +
+          "- Encontre 'Localização' nas permissões\n" +
+          "- Selecione 'Permitir'\n" +
+          "- Atualize a página e tente novamente."
+        );
+      } else {
+        // Para outros erros, apenas informar e continuar
+        alert("Não foi possível obter sua localização. Verifique as configurações do seu dispositivo.");
+        setShowCamera(true);
+      }
     },
     
     options
   );
 };
-
   
   // Nova função para lidar com a captura de imagem
   const handleCaptureImage = async (imageSrc) => {
