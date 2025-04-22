@@ -28,7 +28,8 @@ const SecurityApp = ({ onLogin }) => {
   const inactivityTimerRef = useRef(null);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [isIntentionalLogout, setIsIntentionalLogout] = useState(false);
-
+  const [isLoading, setIsLoading] = useState(false);
+  const [locationError, setLocationError] = useState('');
   // Função para redefinir o temporizador de inatividade
   const resetInactivityTimer = useCallback(() => {
     if (inactivityTimerRef.current) {
@@ -210,26 +211,79 @@ const SecurityApp = ({ onLogin }) => {
   
   // Compartilhar localização e abrir câmera
   const handleShareLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
+    // Verificar se a geolocalização é suportada
+    if (!navigator.geolocation) {
+      alert("Geolocalização não é suportada neste dispositivo ou navegador.");
+      return;
+    }
+  
+    // Mostrar indicador de carregamento
+    setIsLoading(true);
+    setLocationError('');
+  
+    // Opções para melhorar a precisão e o tempo limite
+    const options = {
+      enableHighAccuracy: true,
+      timeout: 10000, // 10 segundos
+      maximumAge: 0 // Forçar uma leitura nova
+    };
+  
+    navigator.geolocation.getCurrentPosition(
+      // Sucesso
+      (position) => {
+        console.log("Localização obtida com sucesso:", position);
+        setLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy
+        });
+        
+        // Abrir a câmera após obter a localização
+        setIsLoading(false);
+        setShowCamera(true);
+      },
+      
+      // Erro
+      (error) => {
+        setIsLoading(false);
+        console.error("Erro detalhado na geolocalização:", error.code, error.message);
+        
+        let errorMessage = "";
+        switch(error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage = "Acesso à localização foi negado. Para continuar, você precisa permitir o acesso à localização nas configurações do seu navegador.";
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage = "Informações de localização não estão disponíveis no momento. Verifique se o GPS está ativado.";
+            break;
+          case error.TIMEOUT:
+            errorMessage = "Tempo esgotado ao tentar obter sua localização. Tente novamente.";
+            break;
+          default:
+            errorMessage = "Erro desconhecido ao obter localização.";
+        }
+        
+        // Mostrar erro em um modal ou componente na interface
+        setLocationError(errorMessage);
+        
+        // Opção para o usuário: mostrar instruções ou continuar sem localização
+        if (window.confirm(`${errorMessage}\n\nDeseja continuar mesmo sem compartilhar localização?`)) {
+          // Definir uma localização padrão ou vazia
           setLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-            accuracy: position.coords.accuracy
+            lat: 0,
+            lng: 0,
+            accuracy: 0,
+            skipped: true // Flag para indicar que o usuário pulou
           });
           
-          // Abrir a câmera após obter a localização
+          // Continuar para a câmera
           setShowCamera(true);
-        },
-        (error) => {
-          console.error("Erro ao obter localização:", error);
-          alert("Não foi possível obter sua localização. Verifique as permissões.");
         }
-      );
-    } else {
-      alert("Geolocalização não é suportada neste dispositivo ou navegador.");
-    }
+      },
+      
+      // Opções
+      options
+    );
   };
 
   
