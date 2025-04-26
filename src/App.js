@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Camera from './components/Camera';
-import { getCurrentUser, loginWithEmailAndPassword, logout, getUserRole } from './services/authService';
+import { getCurrentUser, loginWithEmailAndPassword, logout, getUserRole, getUserData } from './services/authService';
 import { registerCheckIn } from './services/checkInService';
 import { uploadImage, optimizeImage } from './services/cloudinaryService'; // Se você estiver usando Cloudinary
 import { getAuth, getIdToken } from 'firebase/auth';
@@ -136,31 +136,42 @@ const SecurityApp = ({ onLogin }) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-  
     try {
-      const user = await loginWithEmailAndPassword(username, password);
+      // Email e senha para login
+      const emailLogin = username; // Armazenar o email usado para login
+      const user = await loginWithEmailAndPassword(emailLogin, password);
       
-      // Verificar se temos informações do usuário
       if (!user) {
         setError('Falha na autenticação. Nenhuma informação de usuário retornada.');
         setLoading(false);
         return;
       }
       
+      // Primeiro verificar o papel do usuário
       const userRole = await getUserRole(user.uid);
+      
       if (userRole !== 'security') {
         setError('Acesso não autorizado. Este aplicativo é apenas para seguranças.');
         setLoading(false);
         return;
-      } else {
-        setUser(user);
-        setScreen('monitoring');
-      }
-      if (typeof onLogin === 'function') {
-        onLogin({ username, role: 'security' });
       }
       
-    } catch (error) {      
+      // Se passou na verificação de papel, buscar dados completos
+      const userData = await getUserData(user.uid);
+      
+      // IMPORTANTE: Usar especificamente o campo 'username' do banco de dados
+      const displayName = userData.username || emailLogin;
+      console.log("Nome a ser exibido:", displayName);
+      
+      // Atualizar o estado com o nome de exibição correto
+      setUsername(displayName);
+      setUser(user);
+      setScreen('monitoring');
+      
+      if (typeof onLogin === 'function') {
+        onLogin({ username: displayName, role: 'security' });
+      }
+     } catch (error) {      
       // Tratamento específico para diferentes tipos de erro do Firebase
       if (error.code === 'auth/invalid-credential') {
         setError('Email ou senha incorretos. Verifique suas credenciais.');
