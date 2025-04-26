@@ -16,6 +16,29 @@ export const loginWithEmailAndPassword = async (email, password) => {
   }
 };
 
+export const getUserData = async (userId) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    const userDoc = await getDoc(userRef);
+    
+    if (!userDoc.exists()) {
+      console.error("Documento do usuário não encontrado");
+      return null;
+    }
+    
+    // Log para depuração
+    console.log("Dados do usuário:", userDoc.data());
+    
+    return {
+      ...userDoc.data(),
+      id: userId
+    };
+  } catch (error) {
+    console.error("Erro ao obter dados do usuário:", error);
+    throw error;
+  }
+};
+
 export const getUserRole = async (userId) => {
   try {
     // Assumindo que você já configurou a referência ao Firestore
@@ -24,7 +47,7 @@ export const getUserRole = async (userId) => {
     if (userDoc.exists()) {
       return userDoc.data().role || 'user'; // 'user' como fallback padrão
     } else {
-      console.log("Usuário não encontrado no Firestore");
+      console.log("Usuário não encontrado");
       return 'user'; // Papel padrão
     }
   } catch (error) {
