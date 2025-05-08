@@ -1,13 +1,20 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import Camera from './components/Camera';
-import { getCurrentUser, loginWithEmailAndPassword, logout, getUserRole, getUserData } from './services/authService';
+import { 
+  getCurrentUser, 
+  loginWithEmailAndPassword, 
+  logout, 
+  getUserRole, 
+  getUserData,
+  isOperationalRole,
+  getRoleName 
+} from './services/authService';
 import { registerCheckIn } from './services/checkInService';
-import { uploadImage, optimizeImage } from './services/cloudinaryService'; // Se você estiver usando Cloudinary
+import { uploadImage, optimizeImage } from './services/cloudinaryService';
 import { getAuth, getIdToken } from 'firebase/auth';
 import Map from './components/Map';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './firebase';
-
 
 const SecurityApp = ({ onLogin }) => {
   // Estados existentes
@@ -23,6 +30,7 @@ const SecurityApp = ({ onLogin }) => {
   const [showCamera, setShowCamera] = useState(false);
   const [capturedImage, setCapturedImage] = useState(null);
   const [user, setUser] = useState(null);
+  const [userRole, setUserRole] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [verificationComplete, setVerificationComplete] = useState(false);
   const inactivityTimerRef = useRef(null);
@@ -30,6 +38,7 @@ const SecurityApp = ({ onLogin }) => {
   const [isIntentionalLogout, setIsIntentionalLogout] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [locationError, setLocationError] = useState('');
+  
   // Função para redefinir o temporizador de inatividade
   const resetInactivityTimer = useCallback(() => {
     if (inactivityTimerRef.current) {
@@ -43,6 +52,12 @@ const SecurityApp = ({ onLogin }) => {
       }
     }, 30 * 60 * 1000);
   }, [user]);
+
+  // Função para mostrar o título da função de forma amigável
+  const getFunctionTitle = () => {
+    if (!userRole) return 'Aplicativo de Monitoramento';
+    return `Aplicativo de ${getRoleName(userRole)}`;
+  };
 
   const getAuthToken = async () => {
     const auth = getAuth();
@@ -77,11 +92,22 @@ const SecurityApp = ({ onLogin }) => {
 
   // Atualizar data e hora a cada segundo
   useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentDateTime(new Date());
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  // Verificar autenticação no carregamento
+  useEffect(() => {
     const checkAuth = async () => {
       try {
         const currentUser = await getCurrentUser();
         if (currentUser) {
           setUser(currentUser);
+          setUserRole(currentUser.role || '');
+          setUsername(currentUser.username || currentUser.email);
         }
       } catch (error) {
         console.error("Erro ao verificar autenticação:", error);
@@ -150,8 +176,9 @@ const SecurityApp = ({ onLogin }) => {
       // Primeiro verificar o papel do usuário
       const userRole = await getUserRole(user.uid);
       
-      if (userRole !== 'security') {
-        setError('Acesso não autorizado. Este aplicativo é apenas para seguranças.');
+      // Verificar se o usuário tem uma função operacional permitida
+      if (!isOperationalRole(userRole)) {
+        setError('Acesso não autorizado. Este aplicativo é apenas para funções operacionais.');
         setLoading(false);
         return;
       }
@@ -161,15 +188,15 @@ const SecurityApp = ({ onLogin }) => {
       
       // IMPORTANTE: Usar especificamente o campo 'username' do banco de dados
       const displayName = userData.username || emailLogin;
-      console.log("Nome a ser exibido:", displayName);
       
       // Atualizar o estado com o nome de exibição correto
       setUsername(displayName);
       setUser(user);
+      setUserRole(userRole);
       setScreen('monitoring');
       
       if (typeof onLogin === 'function') {
-        onLogin({ username: displayName, role: 'security' });
+        onLogin({ username: displayName, role: userRole });
       }
      } catch (error) {      
       // Tratamento específico para diferentes tipos de erro do Firebase
@@ -209,9 +236,10 @@ const SecurityApp = ({ onLogin }) => {
       setPassword('');
       setLocationShared(false);
       setCapturedImage(null);
+      setUserRole('');
     } catch (error) {
       console.error('Erro ao fazer logout:', error);
-    }finally {
+    } finally {
     // Reset após um breve delay para garantir que o evento de autenticação seja processado
       setTimeout(() => {
         setIsIntentionalLogout(false);
@@ -222,57 +250,56 @@ const SecurityApp = ({ onLogin }) => {
   
   // Compartilhar localização e abrir câmera
   const handleShareLocation = () => {
-  // Verificar se a geolocalização é suportada
-  if (!navigator.geolocation) {
-    alert("Seu dispositivo não suporta geolocalização. Não será possível compartilhar sua localização.");
-    return;
-  }
+    // Verificar se a geolocalização é suportada
+    if (!navigator.geolocation) {
+      alert("Seu dispositivo não suporta geolocalização. Não será possível compartilhar sua localização.");
+      return;
+    }
 
-  // Opções para melhorar a precisão
-  const options = {
-    enableHighAccuracy: true,
-    timeout: 10000,
-    maximumAge: 0
-  };
+    // Opções para melhorar a precisão
+    const options = {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0
+    };
 
-  navigator.geolocation.getCurrentPosition(
-    // Sucesso - obteve a localização
-    (position) => {
-      console.log("Localização obtida com sucesso");
-      setLocation({
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-        accuracy: position.coords.accuracy
-      });
-      
-      // Abrir a câmera após obter a localização
-      setShowCamera(true);
-    },
-    
-    // Erro - mostrar mensagem de orientação apenas se for erro de permissão
-    (error) => {
-      console.error("Erro na geolocalização:", error.code, error.message);
-      
-      if (error.code === error.PERMISSION_DENIED) {
-        // Mostrar modal ou alerta orientando como permitir
-        alert(
-          "Você precisa permitir o acesso à sua localização para continuar.\n\n" +
-          "Para habilitar o acesso:\n" +
-          "- Clique no ícone de cadeado na barra de endereço\n" +
-          "- Encontre 'Localização' nas permissões\n" +
-          "- Selecione 'Permitir'\n" +
-          "- Atualize a página e tente novamente."
-        );
-      } else {
-        // Para outros erros, apenas informar e continuar
-        alert("Não foi possível obter sua localização. Verifique as configurações do seu dispositivo.");
+    navigator.geolocation.getCurrentPosition(
+      // Sucesso - obteve a localização
+      (position) => {
+        setLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy
+        });
+        
+        // Abrir a câmera após obter a localização
         setShowCamera(true);
-      }
-    },
-    
-    options
-  );
-};
+      },
+      
+      // Erro - mostrar mensagem de orientação apenas se for erro de permissão
+      (error) => {
+        console.error("Erro na geolocalização:", error.code, error.message);
+        
+        if (error.code === error.PERMISSION_DENIED) {
+          // Mostrar modal ou alerta orientando como permitir
+          alert(
+            "Você precisa permitir o acesso à sua localização para continuar.\n\n" +
+            "Para habilitar o acesso:\n" +
+            "- Clique no ícone de cadeado na barra de endereço\n" +
+            "- Encontre 'Localização' nas permissões\n" +
+            "- Selecione 'Permitir'\n" +
+            "- Atualize a página e tente novamente."
+          );
+        } else {
+          // Para outros erros, apenas informar e continuar
+          alert("Não foi possível obter sua localização. Verifique as configurações do seu dispositivo.");
+          setShowCamera(true);
+        }
+      },
+      
+      options
+    );
+  };
   
   // Nova função para lidar com a captura de imagem
   const handleCaptureImage = async (imageSrc) => {
@@ -291,7 +318,7 @@ const SecurityApp = ({ onLogin }) => {
       // Registrar check-in no Firebase com os dados completos
       await registerCheckIn(
         user.uid,
-        username, // Nome do segurança
+        username, // Nome do funcionário
         location,  // Localização atual
         photoResult.url // URL da foto no Cloudinary
       );
@@ -318,7 +345,7 @@ const SecurityApp = ({ onLogin }) => {
         <div className="w-full max-w-md bg-white rounded-lg shadow-md overflow-hidden">
           <div className="bg-blue-600 p-4 text-center">
             <h1 className="text-white text-xl font-bold">Sistema de Monitoramento</h1>
-            <p className="text-blue-100 text-sm">Aplicativo de Segurança</p>
+            <p className="text-blue-100 text-sm">Aplicativo de Funcionários</p>
           </div>
           
           <div className="p-6">
@@ -330,7 +357,7 @@ const SecurityApp = ({ onLogin }) => {
             
             <div className="mb-4">
               <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="username">
-                Nome de Usuário
+                Nome de Usuário ou Email
               </label>
               <input 
                 className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
@@ -378,7 +405,7 @@ const SecurityApp = ({ onLogin }) => {
       {/* Cabeçalho */}
       <header className="bg-blue-600 text-white p-4 shadow">
         <div className="flex justify-between items-center">
-          <h1 className="font-bold text-lg">Sistema de Monitoramento</h1>
+          <h1 className="font-bold text-lg">{getFunctionTitle()}</h1>
           <button 
             className="bg-red-500 hover:bg-red-600 text-white text-sm py-1 px-3 rounded" 
             onClick={handleLogout}
@@ -390,12 +417,12 @@ const SecurityApp = ({ onLogin }) => {
       
       {/* Conteúdo principal */}
       <main className="flex-1 p-4">
-        {/* Cartão de informações do segurança */}
+        {/* Cartão de informações do funcionário */}
         <div className="bg-white rounded-lg shadow-md p-4 mb-4">
           <div className="flex items-center">
             <div className="w-14 h-14 bg-gray-200 rounded-full flex items-center justify-center mr-3 overflow-hidden">
               {capturedImage ? (
-                <img src={capturedImage} alt="Foto do segurança" className="w-full h-full object-cover" />
+                <img src={capturedImage} alt="Foto do funcionário" className="w-full h-full object-cover" />
               ) : (
                 <svg className="w-8 h-8 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
@@ -404,7 +431,7 @@ const SecurityApp = ({ onLogin }) => {
             </div>
             <div>
               <h2 className="text-lg font-bold text-gray-800">{username}</h2>
-              <p className="text-sm text-gray-500">Segurança ID: #12345</p>
+              <p className="text-sm text-gray-500">{getRoleName(userRole)}</p>
             </div>
             <div className="ml-auto text-right">
               <p className="text-sm font-medium text-gray-600">{currentDateTime.toLocaleDateString()}</p>
@@ -452,7 +479,7 @@ const SecurityApp = ({ onLogin }) => {
               <div className="rounded-lg overflow-hidden border border-gray-200">
                 <img 
                   src={capturedImage} 
-                  alt="Foto do segurança" 
+                  alt="Foto do funcionário" 
                   className="w-full" 
                 />
               </div>
