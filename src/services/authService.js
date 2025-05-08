@@ -6,6 +6,30 @@ import {
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 
+// Lista de funções operacionais que podem usar o aplicativo
+const operationalRoles = ['security', 'vigia', 'porteiro', 'zelador', 'supervisor', 'sdf'];
+
+// Função auxiliar para verificar se é uma função operacional
+export const isOperationalRole = (role) => {
+  return operationalRoles.includes(role);
+};
+
+// Função para obter nome mais amigável da função
+export const getRoleName = (role) => {
+  const roleNames = {
+    'security': 'Segurança',
+    'vigia': 'Vigia',
+    'porteiro': 'Porteiro',
+    'zelador': 'Zelador',
+    'supervisor': 'Supervisor',
+    'sdf': 'SDF',
+    'admin': 'Administrador',
+    'rh': 'RH'
+  };
+  
+  return roleNames[role] || role;
+};
+
 // Login com email e senha
 export const loginWithEmailAndPassword = async (email, password) => {
   try {
@@ -26,9 +50,6 @@ export const getUserData = async (userId) => {
       return null;
     }
     
-    // Log para depuração
-    console.log("Dados do usuário:", userDoc.data());
-    
     return {
       ...userDoc.data(),
       id: userId
@@ -47,11 +68,9 @@ export const getUserRole = async (userId) => {
     if (userDoc.exists()) {
       return userDoc.data().role || 'user'; // 'user' como fallback padrão
     } else {
-      console.log("Usuário não encontrado");
       return 'user'; // Papel padrão
     }
   } catch (error) {
-    console.log("Erro ao buscar papel do usuário:", error);
     return 'user'; // Papel padrão em caso de erro
   }
 };
@@ -87,8 +106,8 @@ export const getCurrentUser = () => {
           if (userDoc.exists()) {
             const userData = userDoc.data();
             
-            // Verificar se o usuário tem permissão para o app de segurança
-            if (userData.role !== 'security') {
+            // Verificar se o usuário tem permissão para o app (qualquer função operacional)
+            if (!isOperationalRole(userData.role)) {
               await signOut(auth);
               resolve(null);
               return;
