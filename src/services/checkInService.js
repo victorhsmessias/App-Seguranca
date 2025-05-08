@@ -1,5 +1,6 @@
-import { collection, addDoc, serverTimestamp , getDocs, query, where, orderBy } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, getDocs, query, where, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
+import { isOperationalRole } from './authService';
 
 // Registrar um check-in
 export const registerCheckIn = async (userId, username, location, photoUrl) => {
@@ -61,6 +62,41 @@ export const getUserCheckIns = async (userId, limitCount = 10) => {
     return checkIns;
   } catch (error) {
     console.error('Erro ao obter check-ins:', error);
+    throw error;
+  }
+};
+
+// Obter estatísticas de check-in do usuário
+export const getUserCheckInStats = async (userId) => {
+  try {
+    if (!userId) throw new Error('ID de usuário não fornecido');
+    
+    // Obter check-ins de hoje
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const todayQuery = query(
+      collection(db, 'checkIns'),
+      where('userId', '==', userId),
+      where('timestamp', '>=', today)
+    );
+    
+    const todaySnapshot = await getDocs(todayQuery);
+    
+    // Obter todos os check-ins do usuário
+    const allQuery = query(
+      collection(db, 'checkIns'),
+      where('userId', '==', userId)
+    );
+    
+    const allSnapshot = await getDocs(allQuery);
+    
+    return {
+      today: todaySnapshot.size,
+      total: allSnapshot.size
+    };
+  } catch (error) {
+    console.error('Erro ao obter estatísticas de check-in:', error);
     throw error;
   }
 };
