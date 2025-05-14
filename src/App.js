@@ -342,8 +342,8 @@ const SecurityApp = ({ onLogin }) => {
   if (screen === 'login') {
     return (
       <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
+        <img src="/images/logo.png" alt="Logo" className="w-16 h-16 mx-auto mb-2" />
         <div className="w-full max-w-md bg-white rounded-lg shadow-md overflow-hidden">
-          <img src="/images/logo.png" alt="Logo" className="w-16 h-16 mx-auto mb-2" />
           <div className="bg-blue-600 p-4 text-center">
             <h1 className="text-white text-xl font-bold">Sistema de Monitoramento</h1>
           </div>
