@@ -344,7 +344,7 @@ const SecurityApp = ({ onLogin }) => {
       <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
         <div className="w-full max-w-md bg-white rounded-lg shadow-md overflow-hidden">
           <div className="bg-blue-600 p-4 text-center">
-            <img src="/public/images/logo.png" alt="Logo" className="w-16 h-16 mx-auto mb-2" />
+            <img src="/images/logo.png" alt="Logo" className="w-16 h-16 mx-auto mb-2" />
             <h1 className="text-white text-xl font-bold">Sistema de Monitoramento</h1>
           </div>
           
@@ -414,7 +414,11 @@ const SecurityApp = ({ onLogin }) => {
           </button>
         </div>
       </header>
-      
+      <img 
+            src="/images/logo.png" 
+            alt="DS Security Suprema" 
+            className="h-24 w-auto"
+      />
       {/* Conteúdo principal */}
       <main className="flex-1 p-4">
         {/* Cartão de informações do funcionário */}
