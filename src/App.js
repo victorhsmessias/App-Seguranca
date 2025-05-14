@@ -414,11 +414,6 @@ const SecurityApp = ({ onLogin }) => {
           </button>
         </div>
       </header>
-      <img 
-            src="/images/logo.png" 
-            alt="DS Security Suprema" 
-            className="h-24 w-auto"
-      />
       {/* Conteúdo principal */}
       <main className="flex-1 p-4">
         {/* Cartão de informações do funcionário */}
