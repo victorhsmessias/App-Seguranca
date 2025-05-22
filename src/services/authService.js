@@ -71,7 +71,6 @@ export const checkEmployeeLoginStatus = async (email, password) => {
     };
     
   } catch (error) {
-    console.error('Erro na verificação de login:', error);
     throw error;
   }
 };
