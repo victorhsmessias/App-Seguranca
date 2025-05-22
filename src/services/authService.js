@@ -52,14 +52,12 @@ export const checkEmployeeLoginStatus = async (email, password) => {
     
     // 3. Verificar se é um funcionário operacional (não admin)
     if (!isOperationalRole(userData.role)) {
-      console.error('Usuário não tem função operacional:', userData.role);
       await signOut(auth);
       throw new Error('Este aplicativo é apenas para funcionários operacionais.');
     }
     
     // 4. Verificar se o funcionário está bloqueado
     if (userData.status === 'blocked') {
-      console.error('Usuário está bloqueado:', userData.blockReason);
       await signOut(auth);
       const reason = userData.blockReason || 'Conta bloqueada pelo administrador';
       throw new Error(`Sua conta está bloqueada. Motivo: ${reason}`);
