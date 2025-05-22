@@ -217,10 +217,7 @@ const SecurityApp = ({ onLogin }) => {
         onLogin({ username: displayName, role: result.userData.role });
       }
       
-    } catch (error) {
-      console.error('Erro de login:', error);
-      
-      // Tratar erros específicos de bloqueio
+    } catch (error) {     
       if (error.message.includes('bloqueada')) {
         setError(error.message);
       } else if (error.code === 'auth/invalid-credential') {
