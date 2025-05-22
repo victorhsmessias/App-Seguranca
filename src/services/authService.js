@@ -30,6 +30,84 @@ export const getRoleName = (role) => {
   return roleNames[role] || role;
 };
 
+// Verificar se funcionário pode fazer login
+export const checkEmployeeLoginStatus = async (email, password) => {
+  try {    
+    // 1. Primeiro, fazer login normalmente
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+    
+    
+    // 2. Buscar dados do usuário no Firestore
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    
+    if (!userDoc.exists()) {
+      console.error('Usuário não encontrado no Firestore');
+      // Fazer logout se o usuário não existir no Firestore
+      await signOut(auth);
+      throw new Error('Usuário não encontrado no sistema.');
+    }
+    
+    const userData = userDoc.data();
+    
+    // 3. Verificar se é um funcionário operacional (não admin)
+    if (!isOperationalRole(userData.role)) {
+      console.error('Usuário não tem função operacional:', userData.role);
+      await signOut(auth);
+      throw new Error('Este aplicativo é apenas para funcionários operacionais.');
+    }
+    
+    // 4. Verificar se o funcionário está bloqueado
+    if (userData.status === 'blocked') {
+      console.error('Usuário está bloqueado:', userData.blockReason);
+      await signOut(auth);
+      const reason = userData.blockReason || 'Conta bloqueada pelo administrador';
+      throw new Error(`Sua conta está bloqueada. Motivo: ${reason}`);
+    }
+    
+    // 5. Se chegou até aqui, o login é válido
+    return {
+      user: user,
+      userData: userData,
+      success: true
+    };
+    
+  } catch (error) {
+    console.error('Erro na verificação de login:', error);
+    throw error;
+  }
+};
+
+// Verificar status em tempo real (para usar durante o app)
+export const checkCurrentUserStatus = async () => {
+  try {
+    if (!auth.currentUser) {
+      return { blocked: true, reason: 'Usuário não autenticado' };
+    }
+    
+    const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+    
+    if (!userDoc.exists()) {
+      return { blocked: true, reason: 'Usuário não encontrado' };
+    }
+    
+    const userData = userDoc.data();
+    
+    if (userData.status === 'blocked') {
+      return { 
+        blocked: true, 
+        reason: userData.blockReason || 'Conta bloqueada pelo administrador' 
+      };
+    }
+    
+    return { blocked: false, userData: userData };
+    
+  } catch (error) {
+    console.error('Erro ao verificar status atual:', error);
+    return { blocked: true, reason: 'Erro ao verificar status' };
+  }
+};
+
 // Login com email e senha
 export const loginWithEmailAndPassword = async (email, password) => {
   try {
@@ -78,11 +156,9 @@ export const getUserRole = async (userId) => {
 // Logout com registro
 export const logout = async () => {
   try {
-    // Isso vai desautenticar o usuário do Firebase Auth
     await signOut(auth);
     
-    // Se você estiver usando localStorage ou sessionStorage para persistir dados
-    localStorage.removeItem('user'); // Remova qualquer persistência local
+    localStorage.removeItem('user');
     sessionStorage.removeItem('user');
     
     return true;
@@ -108,6 +184,13 @@ export const getCurrentUser = () => {
             
             // Verificar se o usuário tem permissão para o app (qualquer função operacional)
             if (!isOperationalRole(userData.role)) {
+              await signOut(auth);
+              resolve(null);
+              return;
+            }
+            
+            // VERIFICAR SE ESTÁ BLOQUEADO
+            if (userData.status === 'blocked') {
               await signOut(auth);
               resolve(null);
               return;
