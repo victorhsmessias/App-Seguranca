@@ -2,7 +2,8 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import Camera from './components/Camera';
 import { 
   getCurrentUser, 
-  loginWithEmailAndPassword, 
+  checkEmployeeLoginStatus,  
+  checkCurrentUserStatus,    
   logout, 
   getUserRole, 
   getUserData,
@@ -23,7 +24,6 @@ const SecurityApp = ({ onLogin }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  // eslint-disable-next-line no-unused-vars
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const [location, setLocation] = useState(null);
   const [locationShared, setLocationShared] = useState(false);
@@ -39,12 +39,15 @@ const SecurityApp = ({ onLogin }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [locationError, setLocationError] = useState('');
   
+  // 🆕 Novo estado para verificação de bloqueio
+  const [statusCheckInterval, setStatusCheckInterval] = useState(null);
+  
   // Função para redefinir o temporizador de inatividade
   const resetInactivityTimer = useCallback(() => {
     if (inactivityTimerRef.current) {
       clearTimeout(inactivityTimerRef.current);
     }
-    // Encerrar sessão após 30 minutos de inatividade (ajuste conforme necessário)
+    // Encerrar sessão após 30 minutos de inatividade
     inactivityTimerRef.current = setTimeout(() => {
       if (user) {
         setSessionExpired(true);
@@ -71,13 +74,11 @@ const SecurityApp = ({ onLogin }) => {
   const checkNetworkIntegrity = () => {
     const navigatorOnline = window.navigator.onLine;
     
-    // Verificar se não está sendo interceptado (man-in-the-middle)
     return new Promise((resolve) => {
       const start = Date.now();
       fetch('https://www.google.com/generate_204')
         .then(() => {
           const latency = Date.now() - start;
-          // Latência muito baixa para um servidor externo pode indicar interceptação
           resolve({ 
             online: navigatorOnline, 
             secure: latency > 20, 
@@ -117,6 +118,44 @@ const SecurityApp = ({ onLogin }) => {
     checkAuth();
   }, []);
 
+  // 🆕 NOVA FUNÇÃO: Verificar status do usuário periodicamente
+  useEffect(() => {
+    if (!user) return;
+
+    const checkUserStatus = async () => {
+      try {
+        const status = await checkCurrentUserStatus();
+        
+        if (status.blocked) {
+          // Limpar o intervalo antes de fazer logout
+          if (statusCheckInterval) {
+            clearInterval(statusCheckInterval);
+            setStatusCheckInterval(null);
+          }
+          
+          // Mostrar mensagem e fazer logout
+          alert(`Sua conta está bloqueada: ${status.reason}`);
+          await handleLogout();
+        }
+      } catch (error) {
+        console.error('Erro ao verificar status do usuário:', error);
+      }
+    };
+
+    // Verificar status a cada 30 segundos
+    const interval = setInterval(checkUserStatus, 30000);
+    setStatusCheckInterval(interval);
+    
+    // Verificar imediatamente
+    checkUserStatus();
+
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [user]);
+
   // Observar eventos de atividade do usuário
   useEffect(() => {
     if (user) {
@@ -130,7 +169,6 @@ const SecurityApp = ({ onLogin }) => {
         window.addEventListener(event, handleActivity);
       });
       
-      // Configurar o temporizador inicial
       resetInactivityTimer();
       
       return () => {
@@ -149,8 +187,7 @@ const SecurityApp = ({ onLogin }) => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (!firebaseUser && user && !isIntentionalLogout) {
-        // Foi desconectado externamente (não pelo botão logout)
-        setError('Sua sessão foi encerrada em outro dispositivo');
+        setError('Sua sessão foi encerrada');
         setUser(null);
         setScreen('login');
       }
@@ -158,49 +195,35 @@ const SecurityApp = ({ onLogin }) => {
     return () => unsubscribe();
   }, [user, isIntentionalLogout]);
 
+  // 🔄 FUNÇÃO DE LOGIN ATUALIZADA
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    try {
-      // Email e senha para login
-      const emailLogin = username; // Armazenar o email usado para login
-      const user = await loginWithEmailAndPassword(emailLogin, password);
+    
+    try {      
+      // Usar a nova função que verifica bloqueio
+      const result = await checkEmployeeLoginStatus(username, password);
+            
+      // Se chegou até aqui, o login foi aprovado
+      const displayName = result.userData.username || username;
       
-      if (!user) {
-        setError('Falha na autenticação. Nenhuma informação de usuário retornada.');
-        setLoading(false);
-        return;
-      }
-      
-      // Primeiro verificar o papel do usuário
-      const userRole = await getUserRole(user.uid);
-      
-      // Verificar se o usuário tem uma função operacional permitida
-      if (!isOperationalRole(userRole)) {
-        setError('Acesso não autorizado. Este aplicativo é apenas para funções operacionais.');
-        setLoading(false);
-        return;
-      }
-      
-      // Se passou na verificação de papel, buscar dados completos
-      const userData = await getUserData(user.uid);
-      
-      // IMPORTANTE: Usar especificamente o campo 'username' do banco de dados
-      const displayName = userData.username || emailLogin;
-      
-      // Atualizar o estado com o nome de exibição correto
       setUsername(displayName);
-      setUser(user);
-      setUserRole(userRole);
+      setUser(result.user);
+      setUserRole(result.userData.role);
       setScreen('monitoring');
       
       if (typeof onLogin === 'function') {
-        onLogin({ username: displayName, role: userRole });
+        onLogin({ username: displayName, role: result.userData.role });
       }
-     } catch (error) {      
-      // Tratamento específico para diferentes tipos de erro do Firebase
-      if (error.code === 'auth/invalid-credential') {
+      
+    } catch (error) {
+      console.error('Erro de login:', error);
+      
+      // Tratar erros específicos de bloqueio
+      if (error.message.includes('bloqueada')) {
+        setError(error.message);
+      } else if (error.code === 'auth/invalid-credential') {
         setError('Email ou senha incorretos. Verifique suas credenciais.');
       } else if (error.code === 'auth/invalid-email') {
         setError('Email inválido. Verifique seu email.');
@@ -214,12 +237,8 @@ const SecurityApp = ({ onLogin }) => {
         setError('Esta conta foi desativada.');
       } else if (error.code === 'auth/network-request-failed') {
         setError('Erro de conexão. Verifique sua internet.');
-      } else if (error.code) {
-        // Para outros códigos de erro do Firebase
-        setError(`Erro ao fazer login: ${error.code}`);
       } else {
-        // Para erros não reconhecidos
-        setError('Ocorreu um erro inesperado ao fazer login. Tente novamente.');
+        setError(error.message || 'Ocorreu um erro inesperado ao fazer login.');
       }
     } finally {
       setLoading(false);
@@ -228,6 +247,13 @@ const SecurityApp = ({ onLogin }) => {
   
   const handleLogout = async () => {
     setIsIntentionalLogout(true);
+    
+    // Limpar intervalo de verificação de status
+    if (statusCheckInterval) {
+      clearInterval(statusCheckInterval);
+      setStatusCheckInterval(null);
+    }
+    
     try {
       await logout();
       setUser(null);
@@ -237,26 +263,25 @@ const SecurityApp = ({ onLogin }) => {
       setLocationShared(false);
       setCapturedImage(null);
       setUserRole('');
+      setError(''); // Limpar erros
     } catch (error) {
       console.error('Erro ao fazer logout:', error);
     } finally {
-    // Reset após um breve delay para garantir que o evento de autenticação seja processado
       setTimeout(() => {
         setIsIntentionalLogout(false);
       }, 1000);
     }
   };
 
+  // Resto das funções permanecem iguais...
   
   // Compartilhar localização e abrir câmera
   const handleShareLocation = () => {
-    // Verificar se a geolocalização é suportada
     if (!navigator.geolocation) {
       alert("Seu dispositivo não suporta geolocalização. Não será possível compartilhar sua localização.");
       return;
     }
 
-    // Opções para melhorar a precisão
     const options = {
       enableHighAccuracy: true,
       timeout: 10000,
@@ -264,7 +289,6 @@ const SecurityApp = ({ onLogin }) => {
     };
 
     navigator.geolocation.getCurrentPosition(
-      // Sucesso - obteve a localização
       (position) => {
         setLocation({
           lat: position.coords.latitude,
@@ -272,16 +296,13 @@ const SecurityApp = ({ onLogin }) => {
           accuracy: position.coords.accuracy
         });
         
-        // Abrir a câmera após obter a localização
         setShowCamera(true);
       },
       
-      // Erro - mostrar mensagem de orientação apenas se for erro de permissão
       (error) => {
         console.error("Erro na geolocalização:", error.code, error.message);
         
         if (error.code === error.PERMISSION_DENIED) {
-          // Mostrar modal ou alerta orientando como permitir
           alert(
             "Você precisa permitir o acesso à sua localização para continuar.\n\n" +
             "Para habilitar o acesso:\n" +
@@ -291,7 +312,6 @@ const SecurityApp = ({ onLogin }) => {
             "- Atualize a página e tente novamente."
           );
         } else {
-          // Para outros erros, apenas informar e continuar
           alert("Não foi possível obter sua localização. Verifique as configurações do seu dispositivo.");
           setShowCamera(true);
         }
@@ -301,7 +321,6 @@ const SecurityApp = ({ onLogin }) => {
     );
   };
   
-  // Nova função para lidar com a captura de imagem
   const handleCaptureImage = async (imageSrc) => {
     setCapturedImage(imageSrc);
     setShowCamera(false);
@@ -309,22 +328,26 @@ const SecurityApp = ({ onLogin }) => {
     try {
       setIsSubmitting(true);
       
-      // Otimizar a imagem antes do upload
       const optimizedImage = await optimizeImage(imageSrc, 0.6);
-      
-      // Upload para o Cloudinary
       const photoResult = await uploadImage(optimizedImage);
       
-      // Registrar check-in no Firebase com os dados completos
+      // Verificar se ainda está logado antes de registrar check-in
+      const status = await checkCurrentUserStatus();
+      if (status.blocked) {
+        alert(`Sua conta está bloqueada: ${status.reason}`);
+        await handleLogout();
+        return;
+      }
+      
       await registerCheckIn(
         user.uid,
-        username, // Nome do funcionário
-        location,  // Localização atual
-        photoResult.url // URL da foto no Cloudinary
+        username,
+        location,
+        photoResult.url
       );
       
       setLocationShared(true);
-      setVerificationComplete(true); // Marca a verificação como completa
+      setVerificationComplete(true);
     } catch (error) {
       console.error('Erro ao registrar check-in:', error);
       alert('Erro ao enviar os dados. Por favor, tente novamente.');
@@ -333,7 +356,6 @@ const SecurityApp = ({ onLogin }) => {
     }
   };
   
-  // Função para cancelar a captura de foto
   const handleCancelCapture = () => {
     setShowCamera(false);
   };
@@ -350,7 +372,11 @@ const SecurityApp = ({ onLogin }) => {
           
           <div className="p-6">
             {error && (
-              <div className="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+              <div className={`mb-4 border px-4 py-3 rounded ${
+                error.includes('bloqueada') 
+                  ? 'bg-red-100 border-red-400 text-red-700' 
+                  : 'bg-red-100 border-red-400 text-red-700'
+              }`}>
                 {error}
               </div>
             )}
@@ -399,6 +425,7 @@ const SecurityApp = ({ onLogin }) => {
     );
   }
   
+  // Resto do componente permanece igual...
   // Tela de Monitoramento
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
@@ -414,9 +441,9 @@ const SecurityApp = ({ onLogin }) => {
           </button>
         </div>
       </header>
-      {/* Conteúdo principal */}
+      
+      {/* Resto do JSX permanece igual... */}
       <main className="flex-1 p-4">
-        {/* Cartão de informações do funcionário */}
         <div className="bg-white rounded-lg shadow-md p-4 mb-4">
           <div className="flex items-center">
             <div className="w-14 h-14 bg-gray-200 rounded-full flex items-center justify-center mr-3 overflow-hidden">
@@ -439,11 +466,8 @@ const SecurityApp = ({ onLogin }) => {
           </div>
         </div>
         
-        {/* Mapa e localização */}
         <div className="bg-white rounded-lg shadow-md overflow-hidden mb-4">
-          {/* Componente de mapa*/}
           <Map location={location} />          
-          {/* Botão de compartilhar localização */}
           <div className="p-4">
             <button 
               className={`w-full font-bold py-3 px-4 rounded-lg ${
@@ -459,7 +483,6 @@ const SecurityApp = ({ onLogin }) => {
           </div>
         </div>
         
-        {/* Status e informações adicionais */}
         <div className="bg-white rounded-lg shadow-md p-4">
           <h3 className="font-bold text-gray-700 mb-2">Status de Monitoramento:</h3>
           <div className="flex items-center mb-3">
@@ -471,7 +494,6 @@ const SecurityApp = ({ onLogin }) => {
             </p>
           </div>
           
-          {/* Mostrar imagem capturada */}
           {capturedImage && (
             <div className="mt-3">
               <p className="mb-2 font-medium text-gray-700">Foto de verificação:</p>
@@ -498,7 +520,6 @@ const SecurityApp = ({ onLogin }) => {
         </div>
       </main>
       
-      {/* Componente da câmera (aparece quando showCamera é true) */}
       {showCamera && (
         <Camera
           onCapture={handleCaptureImage}
