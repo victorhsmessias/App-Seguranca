@@ -16,6 +16,7 @@ import { getAuth, getIdToken } from 'firebase/auth';
 import Map from './components/Map';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './firebase';
+import { enhanceImagePipeline, analyzeImageQuality } from './services/imageEnhancementUtils';
 
 const SecurityApp = ({ onLogin }) => {
   // Estados existentes
@@ -325,22 +326,68 @@ const SecurityApp = ({ onLogin }) => {
     try {
       setIsSubmitting(true);
       
-      const optimizedImage = await optimizeImage(imageSrc, 0.6);
-      const photoResult = await uploadImage(optimizedImage);
+      // Criar canvas para processar a imagem
+      const img = new Image();
+      img.src = imageSrc;
+      await new Promise(resolve => img.onload = resolve);
       
-      // Verificar se ainda está logado antes de registrar check-in
-      const status = await checkCurrentUserStatus();
-      if (status.blocked) {
-        alert(`Sua conta está bloqueada: ${status.reason}`);
-        await handleLogout();
-        return;
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      
+      // Analisar qualidade inicial
+      const initialQuality = analyzeImageQuality(canvas);
+      
+      if (!initialQuality.isAcceptable) {
+        // Aplicar pipeline de melhorias
+        const enhancedQuality = await enhanceImagePipeline(canvas, {
+          applyHistogram: true,
+          applyCLAHEFilter: true,
+          reduceNoise: true,
+          enhanceBrightness: true,
+          autoWhiteBalance: true
+        });
+        
+        // Se ainda não estiver aceitável após melhorias
+        if (!enhancedQuality.isAcceptable) {
+          const retry = window.confirm(
+            'A qualidade da imagem está baixa. ' +
+            enhancedQuality.recommendations.join('\n') +
+            '\n\nDeseja tirar outra foto?'
+          );
+          
+          if (retry) {
+            setShowCamera(true);
+            setIsSubmitting(false);
+            return;
+          }
+        }
       }
       
+      // Obter imagem processada
+      const processedImageSrc = canvas.toDataURL('image/jpeg', 0.9);
+      
+      // Continuar com o upload normal
+      const optimizedImage = await optimizeImage(processedImageSrc, 0.8);
+      const photoResult = await uploadImage(optimizedImage);
+      
+      // Adicionar metadados de qualidade ao check-in
       await registerCheckIn(
         user.uid,
         username,
         location,
-        photoResult.url
+        photoResult.url,
+        {
+          quality: initialQuality,
+          enhanced: !initialQuality.isAcceptable,
+          captureConditions: {
+            lowLight: initialQuality.isLowLight,
+            brightness: initialQuality.brightness,
+            timestamp: new Date().toISOString()
+          }
+        }
       );
       
       setLocationShared(true);

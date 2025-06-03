@@ -8,6 +8,10 @@ const Camera = ({ onCapture, onCancel }) => {
   const [errorMsg, setErrorMsg] = useState('');
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [devices, setDevices] = useState([]);
+  const [torchEnabled, setTorchEnabled] = useState(false);
+  const [stream, setStream] = useState(null);
+  const [brightness, setBrightness] = useState(0);
+  const [useScreenLight, setUseScreenLight] = useState(false);
 
   // Função para listar dispositivos de câmera disponíveis
   const getAvailableCameras = useCallback(async () => {
@@ -23,47 +27,79 @@ const Camera = ({ onCapture, onCancel }) => {
     }
   }, []);
 
-  // Inicializar câmera com mais robustez
+  // Função para ativar/desativar lanterna
+  const toggleTorch = async () => {
+    if (!stream) return;
+    
+    try {
+      const track = stream.getVideoTracks()[0];
+      const capabilities = track.getCapabilities();
+      
+      if (capabilities.torch) {
+        await track.applyConstraints({
+          advanced: [{ torch: !torchEnabled }]
+        });
+        setTorchEnabled(!torchEnabled);
+      } else {
+        // Fallback: usar flash da tela
+        setUseScreenLight(!useScreenLight);
+      }
+    } catch (error) {
+      console.error('Erro ao controlar lanterna:', error);
+      // Usar flash da tela como fallback
+      setUseScreenLight(!useScreenLight);
+    }
+  };
+
+  // Inicializar câmera com configurações otimizadas para baixa luz
   useEffect(() => {
     let mounted = true;
     let activeStream = null;
 
     const initCamera = async () => {
       try {
-        // Verificar se a API é suportada
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
           throw new Error('Seu navegador não suporta acesso à câmera');
         }
 
-        // Verificar dispositivos disponíveis
         const hasDevices = await getAvailableCameras();
         if (!hasDevices) {
           throw new Error('Nenhuma câmera detectada no dispositivo');
         }
 
-        // Configuração para sempre usar a câmera frontal (user)
+        // Configurações otimizadas para baixa luz
         const constraints = {
           video: {
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-            facingMode: "user" // Sempre usa câmera frontal
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: "user",
+            // Configurações avançadas para melhor captura em baixa luz
+            advanced: [
+              {
+                exposureMode: 'manual',
+                exposureTime: 100, // Aumentar tempo de exposição
+                iso: 800, // Aumentar ISO para mais sensibilidade
+                whiteBalanceMode: 'manual',
+                torch: false // Inicialmente desligado
+              }
+            ]
           },
           audio: false
         };
 
         console.log('Solicitando acesso à câmera com:', constraints);
         
-        // Adicionar timeout para evitar travamentos
-        const streamPromise = navigator.mediaDevices.getUserMedia(constraints);
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Timeout ao acessar câmera')), 10000);
-        });
-        
-        activeStream = await Promise.race([streamPromise, timeoutPromise]);
+        activeStream = await navigator.mediaDevices.getUserMedia(constraints);
+        setStream(activeStream);
         
         if (mounted) {
           console.log('Câmera inicializada com sucesso');
           setHasPermission(true);
+          
+          // Verificar capacidades da câmera
+          const track = activeStream.getVideoTracks()[0];
+          const capabilities = track.getCapabilities();
+          console.log('Capacidades da câmera:', capabilities);
         }
       } catch (error) {
         console.error('Erro na primeira tentativa:', error);
@@ -75,6 +111,7 @@ const Camera = ({ onCapture, onCancel }) => {
             activeStream = await navigator.mediaDevices.getUserMedia({ 
               video: { facingMode: "user" } 
             });
+            setStream(activeStream);
             if (mounted) {
               console.log('Segunda tentativa bem-sucedida');
               setHasPermission(true);
@@ -118,11 +155,67 @@ const Camera = ({ onCapture, onCancel }) => {
     };
   }, [getAvailableCameras]);
 
-  // Capturar imagem com verificação de qualidade
+  // Processar imagem para melhorar visibilidade em baixa luz
+  const enhanceImage = (canvas, context) => {
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    
+    // Calcular brilho médio
+    let totalBrightness = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      totalBrightness += (data[i] + data[i + 1] + data[i + 2]) / 3;
+    }
+    const avgBrightness = totalBrightness / (data.length / 4);
+    
+    // Se a imagem estiver muito escura, aplicar melhorias
+    if (avgBrightness < 60) {
+      // Aumentar brilho e contraste
+      const brightnessFactor = 1.5;
+      const contrastFactor = 1.3;
+      
+      for (let i = 0; i < data.length; i += 4) {
+        // Aplicar brilho
+        data[i] = Math.min(255, data[i] * brightnessFactor);
+        data[i + 1] = Math.min(255, data[i + 1] * brightnessFactor);
+        data[i + 2] = Math.min(255, data[i + 2] * brightnessFactor);
+        
+        // Aplicar contraste
+        data[i] = Math.min(255, ((data[i] - 128) * contrastFactor) + 128);
+        data[i + 1] = Math.min(255, ((data[i + 1] - 128) * contrastFactor) + 128);
+        data[i + 2] = Math.min(255, ((data[i + 2] - 128) * contrastFactor) + 128);
+      }
+      
+      // Aplicar redução de ruído simples
+      for (let y = 1; y < canvas.height - 1; y++) {
+        for (let x = 1; x < canvas.width - 1; x++) {
+          const idx = (y * canvas.width + x) * 4;
+          
+          // Média com pixels vizinhos para reduzir ruído
+          for (let c = 0; c < 3; c++) {
+            const sum = 
+              data[idx + c] * 4 +
+              data[idx - 4 + c] + data[idx + 4 + c] +
+              data[idx - canvas.width * 4 + c] + data[idx + canvas.width * 4 + c];
+            data[idx + c] = sum / 8;
+          }
+        }
+      }
+    }
+    
+    context.putImageData(imageData, 0, 0);
+    setBrightness(avgBrightness);
+  };
+
+  // Capturar imagem com melhorias
   const capture = useCallback(() => {
     if (!webcamRef.current || !isCameraReady) {
       setErrorMsg('Câmera não está pronta para captura');
       return;
+    }
+
+    // Ativar flash/lanterna antes da captura
+    if (stream && !torchEnabled && !useScreenLight) {
+      toggleTorch();
     }
 
     setCountdown(3);
@@ -132,61 +225,62 @@ const Camera = ({ onCapture, onCancel }) => {
         if (prevCount <= 1) {
           clearInterval(countdownInterval);
           
-          try {
-            const imageSrc = webcamRef.current?.getScreenshot();
-            
-            if (!imageSrc) {
-              setErrorMsg('Falha ao capturar imagem. Tente novamente.');
-              return null;
-            }
-            
-            // Verificar qualidade da imagem
-            const img = new Image();
-            img.onload = () => {
-              const canvas = document.createElement('canvas');
-              const context = canvas.getContext('2d');
-              canvas.width = img.width;
-              canvas.height = img.height;
-              context.drawImage(img, 0, 0);
+          // Pequeno delay para garantir que o flash esteja ativo
+          setTimeout(() => {
+            try {
+              const imageSrc = webcamRef.current?.getScreenshot();
               
-              const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-              const data = imageData.data;
-              
-              // Análise simplificada de qualidade
-              let sum = 0;
-              for (let i = 0; i < data.length; i += 4) {
-                sum += data[i] + data[i + 1] + data[i + 2];
+              if (!imageSrc) {
+                setErrorMsg('Falha ao capturar imagem. Tente novamente.');
+                return;
               }
               
-              const avg = sum / (data.length / 4) / 3;
-              const isValid = avg > 20 && avg < 235;
+              // Processar imagem para melhorar qualidade em baixa luz
+              const img = new Image();
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                context.drawImage(img, 0, 0);
+                
+                // Aplicar melhorias de imagem
+                enhanceImage(canvas, context);
+                
+                // Adicionar informações sobre condições de luz
+                context.font = '12px Arial';
+                context.fillStyle = brightness < 60 ? 'yellow' : 'white';
+                context.fillText(`Luz: ${brightness < 60 ? 'Baixa' : 'Normal'}`, 10, 20);
+                
+                const enhancedImageSrc = canvas.toDataURL('image/jpeg', 0.9);
+                
+                // Desligar flash após captura
+                if (torchEnabled || useScreenLight) {
+                  toggleTorch();
+                }
+                
+                onCapture(enhancedImageSrc);
+              };
               
-              if (isValid) {
-                onCapture(imageSrc);
-              } else {
-                setErrorMsg('Imagem muito escura ou clara. Verifique a iluminação.');
+              img.onerror = () => {
+                setErrorMsg('Erro ao processar a imagem.');
                 setCountdown(null);
-              }
-            };
-            
-            img.onerror = () => {
-              setErrorMsg('Erro ao processar a imagem.');
+              };
+              
+              img.src = imageSrc;
+            } catch (error) {
+              console.error('Erro na captura:', error);
+              setErrorMsg('Erro ao capturar: ' + error.message);
               setCountdown(null);
-            };
-            
-            img.src = imageSrc;
-          } catch (error) {
-            console.error('Erro na captura:', error);
-            setErrorMsg('Erro ao capturar: ' + error.message);
-            setCountdown(null);
-          }
+            }
+          }, 500);
           
           return null;
         }
         return prevCount - 1;
       });
     }, 1000);
-  }, [webcamRef, onCapture, isCameraReady]);
+  }, [webcamRef, onCapture, isCameraReady, stream, torchEnabled, useScreenLight, brightness]);
 
   // Estado de carregando
   if (hasPermission === null) {
@@ -223,10 +317,20 @@ const Camera = ({ onCapture, onCancel }) => {
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex flex-col items-center justify-center z-[9999]">
-      <div className="bg-white rounded-lg overflow-hidden max-w-md w-full">
+    <div className={`fixed inset-0 bg-black bg-opacity-75 flex flex-col items-center justify-center z-[9999] ${useScreenLight ? 'bg-white' : ''}`}>
+      {/* Flash de tela para iluminação */}
+      {useScreenLight && (
+        <div className="fixed inset-0 bg-white opacity-90 z-[10000]" />
+      )}
+      
+      <div className="bg-white rounded-lg overflow-hidden max-w-md w-full z-[10001]">
         <div className="p-4 bg-blue-600 text-white">
           <h2 className="text-lg font-semibold text-center">Verificação de Identidade</h2>
+          {brightness > 0 && brightness < 60 && (
+            <p className="text-sm text-center mt-1 text-yellow-200">
+              ⚠️ Ambiente com pouca luz detectado
+            </p>
+          )}
         </div>
         
         {errorMsg && (
@@ -242,11 +346,11 @@ const Camera = ({ onCapture, onCancel }) => {
             screenshotFormat="image/jpeg"
             width="100%"
             videoConstraints={{
-              facingMode: "user", // Sempre usar câmera frontal
-              width: { ideal: 640 },
-              height: { ideal: 480 }
+              facingMode: "user",
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
             }}
-            mirrored={true} // Espelhar para melhor experiência com câmera frontal
+            mirrored={true}
             className="border-b"
             onUserMedia={() => setIsCameraReady(true)}
             onUserMediaError={(error) => {
@@ -256,6 +360,27 @@ const Camera = ({ onCapture, onCancel }) => {
             forceScreenshotSourceSize
           />
           
+          {/* Botão de lanterna */}
+          <button
+            onClick={toggleTorch}
+            className={`absolute top-4 right-4 p-3 rounded-full ${
+              torchEnabled || useScreenLight 
+                ? 'bg-yellow-500 text-white' 
+                : 'bg-gray-800 bg-opacity-50 text-white'
+            }`}
+            title="Ativar/Desativar Flash"
+          >
+            {torchEnabled || useScreenLight ? (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            )}
+          </button>
+          
           {countdown !== null && (
             <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
               <div className="text-white text-6xl font-bold">
@@ -264,6 +389,21 @@ const Camera = ({ onCapture, onCancel }) => {
             </div>
           )}
         </div>
+        
+        {/* Dicas para melhor captura */}
+        {brightness > 0 && brightness < 60 && (
+          <div className="p-3 bg-yellow-50 border-t border-yellow-200">
+            <p className="text-sm text-yellow-800">
+              💡 <strong>Dicas para melhor foto:</strong>
+            </p>
+            <ul className="text-xs text-yellow-700 mt-1 ml-4">
+              <li>• Use o botão de flash/lanterna</li>
+              <li>• Aproxime-se de uma fonte de luz</li>
+              <li>• Evite contraluz</li>
+              <li>• Mantenha o dispositivo estável</li>
+            </ul>
+          </div>
+        )}
         
         <div className="p-4 flex justify-center">
           <button
