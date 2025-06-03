@@ -21,16 +21,11 @@ const Camera = ({ onCapture, onCancel }) => {
       if (stream) {
         const track = stream.getVideoTracks()[0];
         const capabilities = track.getCapabilities();
-        
-        console.log('Capacidades de torch:', capabilities);
-        
+                
         // Verificar se o dispositivo suporta torch
         if (capabilities && capabilities.torch) {
           const currentSettings = track.getSettings();
-          const newTorchState = !currentSettings.torch;
-          
-          console.log('Tentando alterar torch para:', newTorchState);
-          
+          const newTorchState = !currentSettings.torch;          
           await track.applyConstraints({
             advanced: [{ 
               torch: newTorchState,
@@ -41,38 +36,25 @@ const Camera = ({ onCapture, onCancel }) => {
           });
           
           setTorchEnabled(newTorchState);
-          console.log('Torch ativado com sucesso:', newTorchState);
           return;
         }
       }
       
       // Se não tem torch ou falhou, usar flash de tela
-      console.log('Torch não disponível, usando flash de tela');
       setUseScreenLight(!useScreenLight);
-      
-      // Informar o usuário sobre o tipo de flash sendo usado
-      if (!useScreenLight) {
-        // Pequeno delay para garantir que o usuário veja a mensagem
-        setTimeout(() => {
-          if (devices.some(device => device.label.toLowerCase().includes('back'))) {
-            alert('💡 Dica: Para usar o flash real, use a câmera traseira do dispositivo');
-          }
-        }, 500);
-      }
       
     } catch (error) {
       console.error('Erro ao controlar flash:', error);
       // Fallback garantido: usar flash da tela
       setUseScreenLight(!useScreenLight);
     }
-  }, [stream, devices, useScreenLight]);
+  }, [stream, useScreenLight]);
 
   // Função para listar dispositivos de câmera disponíveis
   const getAvailableCameras = useCallback(async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(device => device.kind === 'videoinput');
-      console.log('Câmeras disponíveis:', videoDevices);
       setDevices(videoDevices);
       return videoDevices.length > 0;
     } catch (error) {
@@ -94,14 +76,11 @@ const Camera = ({ onCapture, onCancel }) => {
       
       if (capabilities && capabilities.torch) {
         setFlashSupport('torch');
-        console.log('✅ Flash nativo suportado');
       } else {
         setFlashSupport('screen');
-        console.log('📱 Usando flash de tela como fallback');
       }
     } catch (error) {
       setFlashSupport('screen');
-      console.log('⚠️ Erro ao verificar flash, usando fallback');
     }
   }, []);
 
@@ -172,24 +151,8 @@ const Camera = ({ onCapture, onCancel }) => {
           throw new Error('Nenhuma câmera detectada no dispositivo');
         }
 
-        // Detectar se é dispositivo móvel
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-        
-        // Em dispositivos móveis, perguntar qual câmera usar
-        let selectedCamera = "user"; // Padrão: câmera frontal
-        
-        if (isMobile && devices.length > 1) {
-          const useBackCamera = window.confirm(
-            '📸 Deseja usar a câmera traseira?\n\n' +
-            '✅ Câmera traseira: Melhor qualidade e flash real\n' +
-            '🤳 Câmera frontal: Mais fácil para selfie\n\n' +
-            'Clique OK para câmera traseira ou Cancelar para frontal.'
-          );
-          
-          if (useBackCamera) {
-            selectedCamera = { exact: "environment" };
-          }
-        }
+        // Sempre usar câmera frontal para verificação de identidade
+        const selectedCamera = "user";
 
         // Configurações otimizadas para baixa luz
         const constraints = {
@@ -200,7 +163,7 @@ const Camera = ({ onCapture, onCancel }) => {
             // Configurações avançadas para melhor captura em baixa luz
             advanced: [
               {
-                exposureMode: 'continuous', // Mudado de 'manual' para 'continuous'
+                exposureMode: 'continuous',
                 whiteBalanceMode: 'continuous',
                 focusMode: 'continuous',
                 torch: false // Inicialmente desligado
@@ -209,24 +172,16 @@ const Camera = ({ onCapture, onCancel }) => {
           },
           audio: false
         };
-
-        console.log('Solicitando acesso à câmera com:', constraints);
         
         activeStream = await navigator.mediaDevices.getUserMedia(constraints);
         setStream(activeStream);
         
         if (mounted) {
-          console.log('Câmera inicializada com sucesso');
           setHasPermission(true);
-          
           // Verificar capacidades da câmera
           const track = activeStream.getVideoTracks()[0];
           const capabilities = track.getCapabilities();
           const settings = track.getSettings();
-          
-          console.log('Capacidades da câmera:', capabilities);
-          console.log('Configurações atuais:', settings);
-          
           // Verificar suporte a flash
           await checkFlashSupport(activeStream);
         }
@@ -236,13 +191,11 @@ const Camera = ({ onCapture, onCancel }) => {
         // Segunda tentativa com configuração mais simples
         if (mounted && error.name !== 'NotAllowedError') {
           try {
-            console.log('Tentando novamente com configuração mínima');
             activeStream = await navigator.mediaDevices.getUserMedia({ 
               video: { facingMode: "user" } 
             });
             setStream(activeStream);
             if (mounted) {
-              console.log('Segunda tentativa bem-sucedida');
               setHasPermission(true);
               // Verificar suporte a flash também na segunda tentativa
               await checkFlashSupport(activeStream);
@@ -284,7 +237,7 @@ const Camera = ({ onCapture, onCancel }) => {
         activeStream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [getAvailableCameras, devices, checkFlashSupport]);
+  }, [getAvailableCameras, checkFlashSupport]);
 
   // Capturar imagem com melhorias
   const capture = useCallback(() => {
@@ -430,7 +383,7 @@ const Camera = ({ onCapture, onCancel }) => {
           )}
           {flashSupport === 'screen' && (
             <p className="text-xs text-center mt-1 text-blue-200">
-              📱 Flash de tela disponível (toque no ícone de raio)
+              💡 Toque no ícone de raio para ativar o flash de tela
             </p>
           )}
         </div>
@@ -450,7 +403,7 @@ const Camera = ({ onCapture, onCancel }) => {
             width="100%"
             height="100%"
             videoConstraints={{
-              facingMode: "user",
+              facingMode: "user", // Sempre câmera frontal
               width: { ideal: 1280 },
               height: { ideal: 720 }
             }}
