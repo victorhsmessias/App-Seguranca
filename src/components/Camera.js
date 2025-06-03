@@ -18,7 +18,6 @@ const Camera = ({ onCapture, onCancel }) => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(device => device.kind === 'videoinput');
-      console.log('Câmeras disponíveis:', videoDevices);
       setDevices(videoDevices);
       return videoDevices.length > 0;
     } catch (error) {
@@ -87,19 +86,16 @@ const Camera = ({ onCapture, onCancel }) => {
           audio: false
         };
 
-        console.log('Solicitando acesso à câmera com:', constraints);
         
         activeStream = await navigator.mediaDevices.getUserMedia(constraints);
         setStream(activeStream);
         
         if (mounted) {
-          console.log('Câmera inicializada com sucesso');
           setHasPermission(true);
           
           // Verificar capacidades da câmera
           const track = activeStream.getVideoTracks()[0];
           const capabilities = track.getCapabilities();
-          console.log('Capacidades da câmera:', capabilities);
         }
       } catch (error) {
         console.error('Erro na primeira tentativa:', error);
@@ -107,13 +103,11 @@ const Camera = ({ onCapture, onCancel }) => {
         // Segunda tentativa com configuração mais simples
         if (mounted && error.name !== 'NotAllowedError') {
           try {
-            console.log('Tentando novamente com configuração mínima');
             activeStream = await navigator.mediaDevices.getUserMedia({ 
               video: { facingMode: "user" } 
             });
             setStream(activeStream);
             if (mounted) {
-              console.log('Segunda tentativa bem-sucedida');
               setHasPermission(true);
             }
           } catch (secondError) {
