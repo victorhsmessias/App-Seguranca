@@ -115,7 +115,7 @@ const Camera = ({ onCapture, onCancel }) => {
     
     setTimeout(() => {
       setShowFlash(false);
-    }, 400);
+    }, 1200); // Duração do flash
   }, []);
 
   // Capturar imagem
@@ -146,7 +146,7 @@ const Camera = ({ onCapture, onCancel }) => {
                 }
                 
                 onCapture(imageSrc);
-              }, 100);
+              }, 400);
             } else {
               const imageSrc = webcamRef.current?.getScreenshot();
               
@@ -210,13 +210,17 @@ const Camera = ({ onCapture, onCancel }) => {
     <div className="fixed inset-0 bg-black bg-opacity-75 flex flex-col items-center justify-center z-[9999] p-4">
       {/* Flash Effect Overlay */}
       {showFlash && (
-        <div 
-          className="fixed inset-0 bg-white z-[10001] pointer-events-none"
-          style={{ 
-            opacity: 1,
-            animation: 'flash-animation 0.4s ease-out'
-          }}
-        />
+        <>
+          <div className="fixed inset-0 bg-white z-[10001] pointer-events-none" 
+              style={{ opacity: 1 }} />
+          <div className="fixed inset-0 bg-white z-[10002] pointer-events-none" 
+              style={{ opacity: 0.9 }} />
+          <div className="fixed inset-0 bg-white z-[10003] pointer-events-none" 
+              style={{ 
+                background: 'radial-gradient(circle, white 0%, white 60%, rgba(255,255,255,0.8) 100%)',
+                opacity: 1 
+              }} />
+        </>
       )}
       
       <style jsx>{`
