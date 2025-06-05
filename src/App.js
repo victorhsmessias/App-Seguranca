@@ -39,10 +39,9 @@ const SecurityApp = ({ onLogin }) => {
   const [isIntentionalLogout, setIsIntentionalLogout] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [locationError, setLocationError] = useState('');
-  
-  // 🆕 Novo estado para verificação de bloqueio
   const [statusCheckInterval, setStatusCheckInterval] = useState(null);
-  
+  const [loadingLocation, setLoadingLocation] = useState(false);
+
   // Função para redefinir o temporizador de inatividade
   const resetInactivityTimer = useCallback(() => {
     if (inactivityTimerRef.current) {
@@ -56,6 +55,30 @@ const SecurityApp = ({ onLogin }) => {
       }
     }, 30 * 60 * 1000);
   }, [user]);
+
+  const checkIOSPermissions = async () => {
+    // Detectar se é iOS
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    
+    // Verificar se está em HTTPS
+    if (isIOS && window.location.protocol !== 'https:') {
+      alert('Para usar a localização no iOS, o aplicativo deve estar em HTTPS');
+      return false;
+    }
+    
+    // Verificar se a API de permissões está disponível
+    if ('permissions' in navigator) {
+      try {
+        const result = await navigator.permissions.query({ name: 'geolocation' });
+        return result.state !== 'denied';
+      } catch (error) {
+        // iOS Safari não suporta permission.query para geolocation
+        return true; // Tentar mesmo assim
+      }
+    }
+    
+    return true;
+  };
 
   // Função para mostrar o título da função de forma amigável
   const getFunctionTitle = () => {
@@ -119,7 +142,13 @@ const SecurityApp = ({ onLogin }) => {
     checkAuth();
   }, []);
 
-  // 🆕 NOVA FUNÇÃO: Verificar status do usuário periodicamente
+  // Verificar permissões ao entrar na tela de monitoramento
+  useEffect(() => {
+    if (user && screen === 'monitoring') {
+      requestLocationPermission();
+    }
+  }, [user, screen]);
+
   useEffect(() => {
     if (!user) return;
 
@@ -274,32 +303,104 @@ const SecurityApp = ({ onLogin }) => {
   // Resto das funções permanecem iguais...
   
   // Compartilhar localização e abrir câmera
-  const handleShareLocation = () => {
+  const handleShareLocation = async () => {
+    // Verificar suporte básico
     if (!navigator.geolocation) {
-      alert("Seu dispositivo não suporta geolocalização. Não será possível compartilhar sua localização.");
+      alert("Seu dispositivo não suporta geolocalização.");
       return;
     }
 
+    // Verificar permissões no iOS
+    const canProceed = await checkIOSPermissions();
+    if (!canProceed) return;
+
+    // Detectar iOS
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    
+    // Mostrar loading
+    setLoading(true);
+    setError('');
+
     const options = {
       enableHighAccuracy: true,
-      timeout: 10000,
+      timeout: isIOS ? 30000 : 10000, // Maior timeout para iOS
       maximumAge: 0
     };
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLocation({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-          accuracy: position.coords.accuracy
-        });
-        
-        setShowCamera(true);
-      },
+    // Função para tentar obter localização
+    const tryGetLocation = () => {
+      return new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            console.log('Localização obtida:', position);
+            resolve(position);
+          },
+          (error) => {
+            console.error('Erro de geolocalização:', error);
+            reject(error);
+          },
+          options
+        );
+      });
+    };
+
+    try {
+      // Primeira tentativa
+      const position = await tryGetLocation();
       
-      (error) => {
-        console.error("Erro na geolocalização:", error.code, error.message);
-        
+      setLocation({
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy: position.coords.accuracy
+      });
+      
+      setShowCamera(true);
+      setLoading(false);
+      
+    } catch (error) {
+      setLoading(false);
+      
+      // Tratamento específico para iOS
+      if (isIOS) {
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            // Instruções específicas para iOS
+            alert(
+              "Acesso à localização negado.\n\n" +
+              "Para habilitar no iOS:\n" +
+              "1. Abra Ajustes do iPhone/iPad\n" +
+              "2. Role até Safari\n" +
+              "3. Toque em 'Localização'\n" +
+              "4. Selecione 'Perguntar' ou 'Permitir'\n\n" +
+              "Se usando Chrome/Firefox:\n" +
+              "- Vá em Ajustes > Privacidade > Serviços de Localização\n" +
+              "- Encontre o navegador e permita acesso\n\n" +
+              "Depois volte e recarregue a página."
+            );
+            break;
+            
+          case error.POSITION_UNAVAILABLE:
+            alert(
+              "Localização indisponível.\n\n" +
+              "Certifique-se de que:\n" +
+              "- Wi-Fi está ativado (melhora precisão)\n" +
+              "- Serviços de Localização estão ativados\n" +
+              "- Modo Avião está desativado"
+            );
+            break;
+            
+          case error.TIMEOUT:
+            // No iOS, às vezes precisa de uma segunda tentativa
+            if (window.confirm("Tempo esgotado ao obter localização. Tentar novamente?")) {
+              handleShareLocation(); // Recursão
+            }
+            break;
+            
+          default:
+            alert("Erro desconhecido ao obter localização. Tente novamente.");
+        }
+      } else {
+        // Tratamento para outros dispositivos (mantém o código original)
         if (error.code === error.PERMISSION_DENIED) {
           alert(
             "Você precisa permitir o acesso à sua localização para continuar.\n\n" +
@@ -313,11 +414,31 @@ const SecurityApp = ({ onLogin }) => {
           alert("Não foi possível obter sua localização. Verifique as configurações do seu dispositivo.");
           setShowCamera(true);
         }
-      },
-      
-      options
-    );
+      }
+    }
   };
+
+  const requestLocationPermission = async () => {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    
+    if (isIOS) {
+      // No iOS, não podemos solicitar permissão programaticamente
+      // Mas podemos verificar o estado e informar o usuário
+      try {
+        // Fazer uma tentativa silenciosa
+        await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(
+            () => resolve(true),
+            () => resolve(false),
+            { timeout: 1000 }
+          );
+        });
+      } catch (e) {
+        console.log('Permissão de localização ainda não concedida');
+      }
+    }
+  };
+
   
   const handleCaptureImage = async (imageSrc) => {
     setCapturedImage(imageSrc);
@@ -518,11 +639,14 @@ const SecurityApp = ({ onLogin }) => {
                 locationShared 
                   ? "bg-blue-500 hover:bg-blue-600 text-white" 
                   : "bg-green-500 hover:bg-green-600 text-white"
-              }`}
+              } ${loadingLocation ? 'opacity-50 cursor-wait' : ''}`}
               onClick={handleShareLocation}
-              disabled={showCamera}
+              disabled={showCamera || loadingLocation}
             >
-              {locationShared ? "Atualizar Localização e Foto" : "Compartilhar Localização"}
+              {loadingLocation 
+                ? "Obtendo localização..." 
+                : (locationShared ? "Atualizar Localização e Foto" : "Compartilhar Localização")
+              }
             </button>
           </div>
         </div>

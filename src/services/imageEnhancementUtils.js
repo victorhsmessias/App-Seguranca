@@ -1,4 +1,3 @@
-// Utilitários avançados para melhorar imagens capturadas em baixa luminosidade
 
 //Algoritmo de Equalização de Histograma
 export const histogramEqualization = (imageData) => {
