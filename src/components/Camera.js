@@ -9,14 +9,14 @@ const Camera = ({ onCapture, onCancel }) => {
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [devices, setDevices] = useState([]);
   
-  // Estados para Flash
+  // 🆕 Estados para Flash
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchEnabled, setTorchEnabled] = useState(false);
   const [currentStream, setCurrentStream] = useState(null);
   const [flashMode, setFlashMode] = useState('auto'); // 'off', 'on', 'auto'
   const [lowLightDetected, setLowLightDetected] = useState(false);
   
-  // Detectar suporte a flash/torch
+  // 🆕 Detectar suporte a flash/torch
   const checkTorchSupport = useCallback(async (stream) => {
     if (!stream) return false;
     
@@ -44,7 +44,7 @@ const Camera = ({ onCapture, onCancel }) => {
     }
   }, []);
   
-  // Controlar Flash/Torch
+  // 🆕 Controlar Flash/Torch
   const toggleTorch = useCallback(async () => {
     if (!currentStream || !torchSupported) return;
     
@@ -64,7 +64,7 @@ const Camera = ({ onCapture, onCancel }) => {
     }
   }, [currentStream, torchSupported, torchEnabled]);
   
-  // Detectar condições de baixa luz
+  // 🆕 Detectar condições de baixa luz
   const detectLowLight = useCallback(() => {
     if (!webcamRef.current) return;
     
@@ -230,7 +230,7 @@ const Camera = ({ onCapture, onCancel }) => {
     };
   }, [getAvailableCameras, checkTorchSupport, detectLowLight]);
 
-  // Função de flash simulado (tela branca)
+  // 🆕 Função de flash simulado (tela branca)
   const simulateFlash = useCallback(() => {
     const flashDiv = document.createElement('div');
     flashDiv.style.cssText = `
@@ -393,7 +393,7 @@ const Camera = ({ onCapture, onCancel }) => {
           </div>
         )}
         
-        {/* Indicador de baixa luz */}
+        {/* 🆕 Indicador de baixa luz */}
         {lowLightDetected && (
           <div className="p-2 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 flex items-center">
             <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
@@ -433,7 +433,7 @@ const Camera = ({ onCapture, onCancel }) => {
           )}
         </div>
         
-        {/* Controles de Flash */}
+        {/* 🆕 Controles de Flash */}
         <div className="p-3 bg-gray-100 flex justify-center gap-2">
           <button
             onClick={() => setFlashMode('off')}
