@@ -8,7 +8,7 @@ const Camera = ({ onCapture, onCancel }) => {
   const [errorMsg, setErrorMsg] = useState('');
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [devices, setDevices] = useState([]);
-  const [flashMode, setFlashMode] = useState('off'); // Começar com flash desligado
+  const [flashMode, setFlashMode] = useState('off');
   const [showFlash, setShowFlash] = useState(false);
 
   // Função para listar dispositivos de câmera disponíveis
@@ -16,7 +16,6 @@ const Camera = ({ onCapture, onCancel }) => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(device => device.kind === 'videoinput');
-      console.log('Câmeras disponíveis:', videoDevices);
       setDevices(videoDevices);
       return videoDevices.length > 0;
     } catch (error) {
@@ -50,7 +49,6 @@ const Camera = ({ onCapture, onCancel }) => {
           audio: false
         };
 
-        console.log('Solicitando acesso à câmera com:', constraints);
         
         const streamPromise = navigator.mediaDevices.getUserMedia(constraints);
         const timeoutPromise = new Promise((_, reject) => {
@@ -60,7 +58,6 @@ const Camera = ({ onCapture, onCancel }) => {
         activeStream = await Promise.race([streamPromise, timeoutPromise]);
         
         if (mounted) {
-          console.log('Câmera inicializada com sucesso');
           setHasPermission(true);
         }
       } catch (error) {
@@ -68,12 +65,10 @@ const Camera = ({ onCapture, onCancel }) => {
         
         if (mounted && error.name !== 'NotAllowedError') {
           try {
-            console.log('Tentando novamente com configuração mínima');
             activeStream = await navigator.mediaDevices.getUserMedia({ 
               video: { facingMode: "user" } 
             });
             if (mounted) {
-              console.log('Segunda tentativa bem-sucedida');
               setHasPermission(true);
             }
           } catch (secondError) {
@@ -114,18 +109,16 @@ const Camera = ({ onCapture, onCancel }) => {
     };
   }, [getAvailableCameras]);
 
-  //  Flash melhorado - efeito de tela branca mais visível
+  // Flash melhorado
   const triggerFlash = useCallback(() => {
-    console.log('Disparando flash...');
     setShowFlash(true);
     
-    // Manter flash visível por mais tempo
     setTimeout(() => {
       setShowFlash(false);
-    }, 500); // Duração do flash
+    }, 400);
   }, []);
 
-  // Capturar imagem SEM verificação de qualidade
+  // Capturar imagem
   const capture = useCallback(() => {
     if (!webcamRef.current || !isCameraReady) {
       setErrorMsg('Câmera não está pronta para captura');
@@ -140,11 +133,9 @@ const Camera = ({ onCapture, onCancel }) => {
           clearInterval(countdownInterval);
           
           try {
-            // Disparar flash se estiver ativado
             if (flashMode === 'on') {
               triggerFlash();
               
-              // Pequeno delay para garantir que o flash seja visível na captura
               setTimeout(() => {
                 const imageSrc = webcamRef.current?.getScreenshot();
                 
@@ -154,12 +145,9 @@ const Camera = ({ onCapture, onCancel }) => {
                   return;
                 }
                 
-                // REMOVIDO: Toda verificação de qualidade
-                // Envia direto a imagem capturada
                 onCapture(imageSrc);
-              }, 100); // Delay para capturar com flash
+              }, 100);
             } else {
-              // Sem flash, captura imediata
               const imageSrc = webcamRef.current?.getScreenshot();
               
               if (!imageSrc) {
@@ -217,9 +205,10 @@ const Camera = ({ onCapture, onCancel }) => {
     );
   }
 
+  // SOLUÇÃO COM SCROLL - Layout que garante visibilidade do botão
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 flex flex-col items-center justify-center z-[9999]">
-      {/* Flash Effect Overlay - Mais forte e visível */}
+    <div className="fixed inset-0 bg-black bg-opacity-75 flex flex-col items-center justify-center z-[9999] p-4">
+      {/* Flash Effect Overlay */}
       {showFlash && (
         <div 
           className="fixed inset-0 bg-white z-[10001] pointer-events-none"
@@ -238,30 +227,34 @@ const Camera = ({ onCapture, onCancel }) => {
         }
       `}</style>
       
-      <div className="bg-white rounded-lg overflow-hidden max-w-md w-full mx-4 my-4">
-        <div className="p-4 bg-blue-600 text-white">
+      {/* Container com altura máxima e scroll se necessário */}
+      <div className="bg-white rounded-lg overflow-auto max-w-md w-full max-h-[90vh] flex flex-col">
+        {/* Header fixo */}
+        <div className="p-4 bg-blue-600 text-white flex-shrink-0">
           <h2 className="text-lg font-semibold text-center">Verificação de Identidade</h2>
         </div>
         
         {errorMsg && (
-          <div className="p-2 bg-red-100 border-l-4 border-red-500 text-red-700">
+          <div className="p-2 bg-red-100 border-l-4 border-red-500 text-red-700 flex-shrink-0">
             {errorMsg}
           </div>
         )}
         
-        <div className="relative">
+        {/* Área da câmera com altura fixa */}
+        <div className="relative flex-shrink-0" style={{ height: '300px' }}>
           <Webcam
             audio={false}
             ref={webcamRef}
             screenshotFormat="image/jpeg"
             width="100%"
+            height="100%"
             videoConstraints={{
               facingMode: "user",
               width: { ideal: 640 },
               height: { ideal: 480 }
             }}
             mirrored={true}
-            className="border-b"
+            className="h-full object-cover"
             onUserMedia={() => setIsCameraReady(true)}
             onUserMediaError={(error) => {
               console.error('Erro no componente Webcam:', error);
@@ -279,64 +272,65 @@ const Camera = ({ onCapture, onCancel }) => {
           )}
         </div>
         
-        {/* Controles de Flash - Simplificados */}
-        <div className="p-3 bg-gray-100 flex justify-center gap-4">
-          <button
-            onClick={() => setFlashMode('off')}
-            className={`px-4 py-2 rounded flex items-center gap-2 ${
-              flashMode === 'off' 
-                ? 'bg-blue-600 text-white' 
-                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            }`}
-            title="Flash desligado"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-            <span className="text-sm font-medium">Flash Off</span>
-          </button>
+        {/* Controles na parte inferior - sempre visíveis */}
+        <div className="mt-auto flex-shrink-0">
+          {/* Controles de Flash */}
+          <div className="p-3 bg-gray-100 flex justify-center gap-4">
+            <button
+              onClick={() => setFlashMode('off')}
+              className={`px-4 py-2 rounded flex items-center gap-2 ${
+                flashMode === 'off' 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              <span className="text-sm font-medium">Flash Off</span>
+            </button>
+            
+            <button
+              onClick={() => setFlashMode('on')}
+              className={`px-4 py-2 rounded flex items-center gap-2 ${
+                flashMode === 'on' 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              <span className="text-sm font-medium">Flash On</span>
+            </button>
+          </div>
           
-          <button
-            onClick={() => setFlashMode('on')}
-            className={`px-4 py-2 rounded flex items-center gap-2 ${
-              flashMode === 'on' 
-                ? 'bg-blue-600 text-white' 
-                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            }`}
-            title="Flash ligado"
-          >
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-            <span className="text-sm font-medium">Flash On</span>
-          </button>
-        </div>
-        
-        {/*  Área de botões ajustada - Mais espaço e melhor posicionamento */}
-        <div className="p-4 pb-6 space-y-3">
-          <button
-            onClick={capture}
-            disabled={countdown !== null || !isCameraReady}
-            className={`w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-lg flex items-center justify-center transition-all ${
-              (countdown !== null || !isCameraReady) ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            <span className="text-lg">
-              {countdown !== null ? 'Capturando...' : (isCameraReady ? 'Tirar Foto' : 'Aguardando câmera...')}
-            </span>
-          </button>
-          
-          <button 
-            onClick={onCancel}
-            className="w-full text-gray-600 hover:text-gray-800 py-2 transition-colors"
-          >
-            Cancelar
-          </button>
+          {/* Botões de ação */}
+          <div className="p-4 space-y-3">
+            <button
+              onClick={capture}
+              disabled={countdown !== null || !isCameraReady}
+              className={`w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-lg flex items-center justify-center transition-all ${
+                (countdown !== null || !isCameraReady) ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              <span className="text-lg">
+                {countdown !== null ? 'Capturando...' : (isCameraReady ? 'Tirar Foto' : 'Aguardando câmera...')}
+              </span>
+            </button>
+            
+            <button 
+              onClick={onCancel}
+              className="w-full text-gray-600 hover:text-gray-800 py-2 transition-colors"
+            >
+              Cancelar
+            </button>
+          </div>
         </div>
       </div>
     </div>
