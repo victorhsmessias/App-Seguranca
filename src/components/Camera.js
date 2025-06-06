@@ -11,6 +11,13 @@ const Camera = ({ onCapture, onCancel }) => {
   const [flashMode, setFlashMode] = useState('auto'); // Mudado para 'auto' por padrão
   const [showFlash, setShowFlash] = useState(false);
   const [isLowLight, setIsLowLight] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+
+  // Detectar iOS
+  useEffect(() => {
+    const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    setIsIOS(iOS);
+  }, [isIOS]);
 
   // Função para listar dispositivos de câmera disponíveis
   const getAvailableCameras = useCallback(async () => {
@@ -24,6 +31,28 @@ const Camera = ({ onCapture, onCancel }) => {
       return false;
     }
   }, []);
+
+  // Aplicar estilos globais para máximo brilho durante flash
+  useEffect(() => {
+    if (showFlash) {
+      // Adicionar meta tag temporária para brilho máximo (funciona em alguns dispositivos)
+      const metaBrightness = document.createElement('meta');
+      metaBrightness.name = 'brightness';
+      metaBrightness.content = 'maximum';
+      document.head.appendChild(metaBrightness);
+      
+      // Forçar repaint para garantir aplicação dos estilos
+      document.body.style.transform = 'translateZ(0)';
+      
+      return () => {
+        // Limpar meta tag quando flash terminar
+        if (metaBrightness.parentNode) {
+          metaBrightness.parentNode.removeChild(metaBrightness);
+        }
+        document.body.style.transform = '';
+      };
+    }
+  }, [showFlash]);
 
   // Detectar condições de baixa luminosidade
   useEffect(() => {
@@ -152,27 +181,118 @@ const Camera = ({ onCapture, onCancel }) => {
     };
   }, [getAvailableCameras]);
 
-  // Flash melhorado com controle de intensidade
-  const triggerFlash = useCallback(() => {
-    // Salvar o brilho original da tela (se disponível)
+  // Flash melhorado com controle de intensidade e brilho máximo
+  const triggerFlash = useCallback(async () => {
+    // Salvar configurações originais
     const originalBrightness = window.screen?.brightness;
     
-    // Tentar aumentar o brilho da tela ao máximo (funciona em alguns dispositivos)
-    if (window.screen?.brightness) {
-      window.screen.brightness = 1.0;
+    // 1. Tentar Wake Lock API para manter tela ativa com brilho máximo
+    let wakeLock = null;
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+      }
+    } catch (err) {
+      console.log('Wake Lock não disponível:', err);
+    }
+    
+    // 2. Tentar aumentar brilho via Screen API (funciona em alguns Android)
+    if (window.screen?.brightness !== undefined) {
+      try {
+        window.screen.brightness = 1.0; // Máximo brilho
+      } catch (err) {
+        console.log('Não foi possível ajustar brilho:', err);
+      }
+    }
+    
+    // 3. Adicionar classe ao body para forçar brilho máximo via CSS
+    document.body.classList.add('flash-active-max-brightness');
+    
+    const isIOSDevice = isIOS; // Capturar valor no escopo da função
+    
+    // 4. Criar elemento fullscreen branco temporário
+    const flashOverlay = document.createElement('div');
+    
+    // Configurações específicas para iOS
+    if (isIOSDevice) {
+      flashOverlay.style.cssText = `
+        position: fixed;
+        top: -100%;
+        left: -100%;
+        width: 300%;
+        height: 300%;
+        background: white;
+        z-index: 999999;
+        pointer-events: none;
+        -webkit-transform: translate3d(0,0,0);
+        transform: translate3d(0,0,0);
+      `;
+      
+      // No iOS, forçar renderização de hardware
+      document.documentElement.style.webkitTransform = 'scale(1)';
+    } else {
+      flashOverlay.style.cssText = `
+        position: fixed;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: white;
+        z-index: 999999;
+        pointer-events: none;
+      `;
+    }
+    document.body.appendChild(flashOverlay);
+    
+    // 5. Desabilitar temporariamente economia de energia (se possível)
+    const metaViewport = document.querySelector('meta[name="viewport"]');
+    const originalViewport = metaViewport?.content;
+    if (metaViewport) {
+      metaViewport.content = originalViewport + ', user-scalable=no';
     }
     
     setShowFlash(true);
     
     // Manter o flash por mais tempo para garantir iluminação adequada
-    setTimeout(() => {
+    setTimeout(async () => {
       setShowFlash(false);
       
-      // Restaurar brilho original
-      if (window.screen?.brightness && originalBrightness !== undefined) {
-        window.screen.brightness = originalBrightness;
+      // Remover overlay extra
+      if (flashOverlay && flashOverlay.parentNode) {
+        flashOverlay.parentNode.removeChild(flashOverlay);
       }
-    }, 1500); // Aumentado para 1.5 segundos
+      
+      // Remover classe do body
+      document.body.classList.remove('flash-active-max-brightness');
+      
+      // Limpar transformação do iOS
+      if (isIOSDevice) {
+        document.documentElement.style.webkitTransform = '';
+      }
+      
+      // Restaurar viewport
+      if (metaViewport && originalViewport) {
+        metaViewport.content = originalViewport;
+      }
+      
+      // Liberar Wake Lock
+      if (wakeLock) {
+        try {
+          await wakeLock.release();
+        } catch (err) {
+          console.log('Erro ao liberar Wake Lock:', err);
+        }
+      }
+      
+      // Restaurar brilho original
+      if (window.screen?.brightness !== undefined && originalBrightness !== undefined) {
+        try {
+          window.screen.brightness = originalBrightness;
+        } catch (err) {
+          console.log('Erro ao restaurar brilho:', err);
+        }
+      }
+    }, 1800); // Aumentado para 1.8 segundos
   }, []);
 
   // Capturar imagem com flash aprimorado
@@ -210,8 +330,8 @@ const Camera = ({ onCapture, onCancel }) => {
                 // Pequeno delay adicional para garantir que a foto foi tirada com flash
                 setTimeout(() => {
                   onCapture(imageSrc);
-                }, 100);
-              }, 600); // Capturar no pico do flash
+                }, 200); // Aumentado para garantir captura no pico do brilho
+              }, 800); // Aumentado para capturar no momento de máximo brilho
             } else {
               const imageSrc = webcamRef.current?.getScreenshot();
               
@@ -301,6 +421,21 @@ const Camera = ({ onCapture, onCancel }) => {
                 opacity: 0.95,
                 filter: 'brightness(1.5) contrast(1.2)'
               }} />
+          {/* Camada adicional para dispositivos com tela OLED/AMOLED */}
+          <div className="fixed inset-0 z-[10005] pointer-events-none"
+              style={{
+                backgroundColor: '#FFFFFF',
+                opacity: 1,
+                transform: 'scale(1.1)',
+                filter: 'blur(0px) brightness(1.3)'
+              }} />
+          {/* Elemento de reforço para brilho máximo */}
+          <div className="fixed inset-0 z-[10006] pointer-events-none"
+              style={{
+                background: 'linear-gradient(0deg, white 0%, white 100%)',
+                mixBlendMode: 'screen',
+                opacity: 1
+              }} />
         </>
       )}
       
@@ -319,6 +454,26 @@ const Camera = ({ onCapture, onCancel }) => {
         /* Forçar máximo brilho durante o flash */
         .flash-active {
           filter: brightness(2) contrast(1.1);
+        }
+        
+        /* CSS para maximizar brilho da tela durante flash */
+        :global(.flash-active-max-brightness) {
+          filter: brightness(1.5) !important;
+        }
+        
+        :global(.flash-active-max-brightness *) {
+          filter: brightness(1.2) !important;
+          opacity: 1 !important;
+        }
+        
+        /* Forçar tela a ficar acordada e brilhante */
+        @media screen {
+          :global(.flash-active-max-brightness) {
+            backface-visibility: hidden !important;
+            -webkit-backface-visibility: hidden !important;
+            transform: translateZ(0) !important;
+            -webkit-transform: translateZ(0) !important;
+          }
         }
       `}</style>
       
