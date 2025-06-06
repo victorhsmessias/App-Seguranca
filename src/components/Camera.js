@@ -8,8 +8,9 @@ const Camera = ({ onCapture, onCancel }) => {
   const [errorMsg, setErrorMsg] = useState('');
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [devices, setDevices] = useState([]);
-  const [flashMode, setFlashMode] = useState('off');
+  const [flashMode, setFlashMode] = useState('auto'); // Mudado para 'auto' por padrão
   const [showFlash, setShowFlash] = useState(false);
+  const [isLowLight, setIsLowLight] = useState(false);
 
   // Função para listar dispositivos de câmera disponíveis
   const getAvailableCameras = useCallback(async () => {
@@ -23,6 +24,48 @@ const Camera = ({ onCapture, onCancel }) => {
       return false;
     }
   }, []);
+
+  // Detectar condições de baixa luminosidade
+  useEffect(() => {
+    if (!webcamRef.current || !isCameraReady) return;
+    
+    const checkLightConditions = () => {
+      try {
+        const video = webcamRef.current?.video;
+        if (!video) return;
+        
+        // Criar canvas temporário para análise
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = 100; // Tamanho reduzido para performance
+        canvas.height = 100;
+        
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        
+        // Calcular luminosidade média
+        let brightness = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          // Fórmula de luminosidade perceptual
+          brightness += (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+        }
+        brightness = brightness / (data.length / 4);
+        
+        // Considerar baixa luminosidade se < 70 (0-255)
+        setIsLowLight(brightness < 70);
+      } catch (error) {
+        console.error('Erro ao verificar luminosidade:', error);
+      }
+    };
+    
+    // Verificar a cada 2 segundos
+    const interval = setInterval(checkLightConditions, 2000);
+    // Verificar imediatamente
+    checkLightConditions();
+    
+    return () => clearInterval(interval);
+  }, [isCameraReady]);
 
   // Inicializar câmera
   useEffect(() => {
@@ -109,16 +152,30 @@ const Camera = ({ onCapture, onCancel }) => {
     };
   }, [getAvailableCameras]);
 
-  // Flash melhorado
+  // Flash melhorado com controle de intensidade
   const triggerFlash = useCallback(() => {
+    // Salvar o brilho original da tela (se disponível)
+    const originalBrightness = window.screen?.brightness;
+    
+    // Tentar aumentar o brilho da tela ao máximo (funciona em alguns dispositivos)
+    if (window.screen?.brightness) {
+      window.screen.brightness = 1.0;
+    }
+    
     setShowFlash(true);
     
+    // Manter o flash por mais tempo para garantir iluminação adequada
     setTimeout(() => {
       setShowFlash(false);
-    }, 1200); // Duração do flash
+      
+      // Restaurar brilho original
+      if (window.screen?.brightness && originalBrightness !== undefined) {
+        window.screen.brightness = originalBrightness;
+      }
+    }, 1500); // Aumentado para 1.5 segundos
   }, []);
 
-  // Capturar imagem
+  // Capturar imagem com flash aprimorado
   const capture = useCallback(() => {
     if (!webcamRef.current || !isCameraReady) {
       setErrorMsg('Câmera não está pronta para captura');
@@ -133,9 +190,14 @@ const Camera = ({ onCapture, onCancel }) => {
           clearInterval(countdownInterval);
           
           try {
-            if (flashMode === 'on') {
+            // Determinar se deve usar flash
+            const shouldUseFlash = flashMode === 'on' || (flashMode === 'auto' && isLowLight);
+            
+            if (shouldUseFlash) {
+              // Ativar flash ANTES da captura
               triggerFlash();
               
+              // Aguardar o flash estar totalmente ativo antes de capturar
               setTimeout(() => {
                 const imageSrc = webcamRef.current?.getScreenshot();
                 
@@ -145,8 +207,11 @@ const Camera = ({ onCapture, onCancel }) => {
                   return;
                 }
                 
-                onCapture(imageSrc);
-              }, 400);
+                // Pequeno delay adicional para garantir que a foto foi tirada com flash
+                setTimeout(() => {
+                  onCapture(imageSrc);
+                }, 100);
+              }, 600); // Capturar no pico do flash
             } else {
               const imageSrc = webcamRef.current?.getScreenshot();
               
@@ -169,7 +234,7 @@ const Camera = ({ onCapture, onCancel }) => {
         return prevCount - 1;
       });
     }, 1000);
-  }, [webcamRef, onCapture, isCameraReady, flashMode, triggerFlash]);
+  }, [webcamRef, onCapture, isCameraReady, flashMode, triggerFlash, isLowLight]);
 
   // Estado de carregando
   if (hasPermission === null) {
@@ -208,17 +273,33 @@ const Camera = ({ onCapture, onCancel }) => {
   // SOLUÇÃO COM SCROLL - Layout que garante visibilidade do botão
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 flex flex-col items-center justify-center z-[9999] p-4">
-      {/* Flash Effect Overlay */}
+      {/* Flash Effect Overlay - Melhorado para máxima iluminação */}
       {showFlash && (
         <>
+          {/* Múltiplas camadas para garantir máximo brilho */}
           <div className="fixed inset-0 bg-white z-[10001] pointer-events-none" 
-              style={{ opacity: 1 }} />
-          <div className="fixed inset-0 bg-white z-[10002] pointer-events-none" 
-              style={{ opacity: 0.9 }} />
-          <div className="fixed inset-0 bg-white z-[10003] pointer-events-none" 
               style={{ 
-                background: 'radial-gradient(circle, white 0%, white 60%, rgba(255,255,255,0.8) 100%)',
+                opacity: 1,
+                backgroundColor: '#FFFFFF',
+                mixBlendMode: 'normal'
+              }} />
+          <div className="fixed inset-0 bg-white z-[10002] pointer-events-none" 
+              style={{ 
+                opacity: 1,
+                backgroundColor: '#FFFFFF',
+                boxShadow: 'inset 0 0 100vw 100vw rgba(255,255,255,0.9)'
+              }} />
+          <div className="fixed inset-0 z-[10003] pointer-events-none" 
+              style={{ 
+                background: 'radial-gradient(circle at center, #FFFFFF 0%, #FFFFFF 40%, #FAFAFA 70%, #F5F5F5 100%)',
                 opacity: 1 
+              }} />
+          {/* Camada extra de luminosidade */}
+          <div className="fixed inset-0 z-[10004] pointer-events-none"
+              style={{
+                backgroundColor: 'white',
+                opacity: 0.95,
+                filter: 'brightness(1.5) contrast(1.2)'
               }} />
         </>
       )}
@@ -226,8 +307,18 @@ const Camera = ({ onCapture, onCancel }) => {
       <style jsx>{`
         @keyframes flash-animation {
           0% { opacity: 0; }
-          20% { opacity: 1; }
+          10% { opacity: 1; }
+          90% { opacity: 1; }
           100% { opacity: 0; }
+        }
+        
+        .flash-overlay {
+          animation: flash-animation 1.5s ease-in-out;
+        }
+        
+        /* Forçar máximo brilho durante o flash */
+        .flash-active {
+          filter: brightness(2) contrast(1.1);
         }
       `}</style>
       
@@ -279,35 +370,64 @@ const Camera = ({ onCapture, onCancel }) => {
         {/* Controles na parte inferior - sempre visíveis */}
         <div className="mt-auto flex-shrink-0">
           {/* Controles de Flash */}
-          <div className="p-3 bg-gray-100 flex justify-center gap-4">
-            <button
-              onClick={() => setFlashMode('off')}
-              className={`px-4 py-2 rounded flex items-center gap-2 ${
-                flashMode === 'off' 
-                  ? 'bg-blue-600 text-white' 
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-              <span className="text-sm font-medium">Flash Off</span>
-            </button>
+          <div className="p-3 bg-gray-100">
+            {/* Indicador de baixa luminosidade */}
+            {isLowLight && flashMode === 'auto' && (
+              <div className="text-center mb-2">
+                <p className="text-sm text-yellow-600 flex items-center justify-center gap-1">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M11 3L8 8H3l7 8v-5h5l-4-8z" />
+                  </svg>
+                  Baixa luminosidade detectada - Flash será ativado
+                </p>
+              </div>
+            )}
             
-            <button
-              onClick={() => setFlashMode('on')}
-              className={`px-4 py-2 rounded flex items-center gap-2 ${
-                flashMode === 'on' 
-                  ? 'bg-blue-600 text-white' 
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              <span className="text-sm font-medium">Flash On</span>
-            </button>
+            <div className="flex justify-center gap-2">
+              <button
+                onClick={() => setFlashMode('off')}
+                className={`px-3 py-2 rounded flex items-center gap-1 text-sm ${
+                  flashMode === 'off' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                <span className="font-medium">Off</span>
+              </button>
+              
+              <button
+                onClick={() => setFlashMode('auto')}
+                className={`px-3 py-2 rounded flex items-center gap-1 text-sm ${
+                  flashMode === 'auto' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M11 3L8 8H3l7 8v-5h5l-4-8z" />
+                  <text x="12" y="18" fontSize="8" fontWeight="bold">A</text>
+                </svg>
+                <span className="font-medium">Auto</span>
+              </button>
+              
+              <button
+                onClick={() => setFlashMode('on')}
+                className={`px-3 py-2 rounded flex items-center gap-1 text-sm ${
+                  flashMode === 'on' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <span className="font-medium">On</span>
+              </button>
+            </div>
           </div>
           
           {/* Botões de ação */}
